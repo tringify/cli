@@ -16,7 +16,21 @@ Windows: download `tringify-windows-amd64.zip` from [Releases](https://github.co
 
 Builds are available for macOS (Apple silicon and Intel), Linux (x86-64 and ARM64), and Windows (x86-64). To build from source: `go install github.com/tringify/cli/cmd/tringify@latest`.
 
-The theme commands use the [Tringify theme tools](https://github.com/tringify/theme-tools), which need Python 3.10 or newer. If `tringify-theme` is not installed, the CLI downloads the theme tools release for your platform on first use, verifies its checksum, and keeps it in `~/.tringify/theme-tools`.
+The CLI is a single binary and needs nothing else installed: no Python, Node.js or other runtime. The first time you check, package or preview a theme, it downloads the theme validator (`themecheck`) and preview renderer (`theme-preview-render`) from the [theme tools](https://github.com/tringify/theme-tools) release for your platform, verifies them against the release's `SHA256SUMS`, and keeps them in your user cache directory:
+
+| System | Location |
+| --- | --- |
+| macOS | `~/Library/Caches/tringify/theme-tools` |
+| Linux | `$XDG_CACHE_HOME/tringify/theme-tools` (usually `~/.cache/tringify/theme-tools`) |
+| Windows | `%LocalAppData%\tringify\theme-tools` |
+
+The CLI looks for a newer theme tools release at most once a day and keeps working offline with the one it has. To control this:
+
+| Variable | Effect |
+| --- | --- |
+| `TRINGIFY_THEME_TOOLS_VERSION` | Use a specific theme tools release, for example `v0.1.0`. |
+| `TRINGIFY_THEME_TOOLS_HOME` | Keep the two binaries in this directory instead of the cache. |
+| `TRINGIFY_THEME_CHECK`, `TRINGIFY_THEME_PREVIEW` | Use a `themecheck` or `theme-preview-render` you already have. The `--checker` and `--renderer` options do the same for one command. |
 
 ## Quick start
 
@@ -47,14 +61,21 @@ Create the listing itself (name, category, pricing, support details) in the [Dev
 | `login --store` | Signs in to a store. `theme push` does this for you when needed. |
 | `logout` | Signs out of the developer organization and revokes the CLI's access. `--store ID` signs out of one store; `--all` signs out everywhere. |
 | `whoami` | Shows the organization and stores you are signed in to and the access each login has. |
-| `theme init [DIR] [--name NAME]` | Creates a theme from [theme-starter](https://github.com/tringify/theme-starter). |
-| `theme preview [DIR]` | Serves a local preview that rebuilds when you edit sources. |
-| `theme check [DIR]` | Validates the theme with the same rules used on upload. |
-| `theme package [DIR] [--output FILE]` | Writes an upload-ready ZIP (default `dist/<theme>.zip`). |
+| `theme init [DIR] [--name NAME] [--from SOURCE]` | Creates a theme from [theme-starter](https://github.com/tringify/theme-starter), or from a local theme directory with `--from`, then builds and validates it. `DIR` must not exist; nothing is created if validation fails. |
+| `theme preview [DIR] [--port 9292] [--preset NAME] [--host ADDRESS]` | Serves a local preview with sample content at `127.0.0.1:9292` and rebuilds when you edit sources. A failed edit shows the error and keeps the last good page. |
+| `theme build [DIR]` | Compiles `src/sections/<name>/` into `sections/<name>.vasc` and updates the section list in `theme.json`. |
+| `theme check [DIR] [--mode sealed\|development]` | Validates the compiled theme, as it is, with the same rules used on upload. Run `theme build` first after editing `src/`. |
+| `theme package [DIR] [OUTPUT]` | Builds in a temporary copy, validates, and writes an upload-ready ZIP (default `dist/<theme>.zip`; `--output FILE` also works). A failed validation never replaces an existing package. |
+| `theme context [DIR] --page PAGE [--entity HANDLE] [--preset NAME]` | Prints the exact sample data (CTX) the preview gives a page, such as `home`, `product`, `collection` or `page`. |
+| `theme contract` | Prints the theme author contract as JSON: CTX roots and fields, editor setting types and hosted form actions. |
 | `theme push --store ID [--storefront ID] [DIR]` | Packages the theme and adds it to the store as a new, unpublished theme. The live theme is not changed. |
 | `theme listings` | Lists your organization's theme listings and their IDs. |
 | `theme publish --listing ID --version X.Y.Z [--notes TEXT] [--breaking] [--install-store ID] [DIR]` | Packages the theme and publishes it as a new version of the listing. |
 | `version` | Prints the CLI version. |
+
+Edit sections in `src/sections/<name>/` as `body.html`, `style.css` and `schema.json`, with shared styles in `src/_shared.css`, or write `sections/*.vasc` files directly. Keep `src/.generated-sections.json` in version control: it records which section files the build generated, so removing a section's source also removes its compiled file safely, and a compiled file you edited by hand is never deleted.
+
+If you used the `tringify-theme` command from the theme tools, every one of its commands is available as `tringify theme <command>` with the same options, rules and output, and works on the same theme files.
 
 `theme publish` only runs from a clean git work tree. The version's release notes record the commit it was built from, so every published version can be traced to its source. With `--install-store`, the new version is also installed, unpublished, into one of your organization's development stores.
 

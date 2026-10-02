@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,13 +15,18 @@ import (
 	"github.com/tringify/cli/internal/auth"
 	"github.com/tringify/cli/internal/devapi"
 	"github.com/tringify/cli/internal/mcp"
+	"github.com/tringify/cli/internal/pyjson"
 	"github.com/tringify/cli/internal/theme"
+	"github.com/tringify/cli/internal/themekit"
 	"github.com/tringify/cli/internal/themetools"
 	"github.com/tringify/cli/internal/upload"
 )
 
-func (a *app) tools() (*themetools.Runner, error) {
-	return themetools.New(a.stdout, a.stderr, a.println)
+func (a *app) tools(checker, renderer string) themekit.Tools {
+	if a.resolver == nil {
+		a.resolver = themetools.New(a.stderr)
+	}
+	return a.resolver.Tools(checker, renderer)
 }
 
 func rootArg(positional []string) (string, error) {
@@ -34,9 +40,28 @@ func rootArg(positional []string) (string, error) {
 	return filepath.Abs(root)
 }
 
+// modeFlag adds the themecheck --mode option.
+func modeFlag(fs *flag.FlagSet) *string {
+	return fs.String("mode", "sealed", "themecheck mode: sealed (upload rules) or development")
+}
+
+func checkMode(mode string) error {
+	if !themekit.ValidMode(mode) {
+		return fmt.Errorf("--mode must be sealed or development, not %q", mode)
+	}
+	return nil
+}
+
+const (
+	checkerHelp  = "path to themecheck (default: TRINGIFY_THEME_CHECK, PATH, or the downloaded theme tools)"
+	rendererHelp = "path to theme-preview-render (default: TRINGIFY_THEME_PREVIEW, PATH, or the downloaded theme tools)"
+)
+
 func (a *app) themeInit(ctx context.Context, args []string) error {
-	fs := newFlags("theme init [DIR] [--name NAME]", "Create a new theme from the Tringify starter theme (github.com/tringify/theme-starter).")
+	fs := newFlags("theme init [DIR] [--name NAME] [--from SOURCE]", "Create a new theme from the Tringify starter theme (github.com/tringify/theme-starter), or from a local theme with --from. The new theme is built and validated before DIR is created.")
 	name := fs.String("name", "", "theme display name (default: derived from DIR)")
+	from := fs.String("from", "", "local theme directory to start from (default: download the starter theme)")
+	checker := fs.String("checker", "", checkerHelp)
 	positional, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -52,8 +77,8 @@ func (a *app) themeInit(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(dest); err == nil {
-		return fmt.Errorf("%s already exists", dir)
+	if _, err := os.Lstat(dest); err == nil {
+		return errors.New("theme initialization failed: destination already exists; choose a new directory")
 	}
 	if *name == "" {
 		words := strings.FieldsFunc(filepath.Base(dest), func(r rune) bool { return r == '-' || r == '_' || r == ' ' })
@@ -62,34 +87,35 @@ func (a *app) themeInit(ctx context.Context, args []string) error {
 		}
 		*name = strings.Join(words, " ")
 	}
-	tools, err := a.tools()
-	if err != nil {
-		return err
+	if _, err := themekit.ValidName(*name); err != nil {
+		return fmt.Errorf("theme initialization failed: %w", err)
 	}
-	a.println("Downloading the starter theme…")
-	starter, cleanup, err := theme.DownloadStarter(ctx, &http.Client{Timeout: 2 * time.Minute})
-	if err != nil {
-		return err
+	source := *from
+	if source == "" {
+		a.println("Downloading the starter theme…")
+		starter, cleanup, err := theme.DownloadStarter(ctx, &http.Client{Timeout: 2 * time.Minute})
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		source = starter
 	}
-	defer cleanup()
-	if err := tools.Run(ctx, filepath.Dir(dest), "init", dest, "--from", starter, "--name", *name); err != nil {
-		return err
+	if _, err := themekit.Initialize(ctx, source, dest, *name, a.tools(*checker, "")); err != nil {
+		return fmt.Errorf("theme initialization failed: %w", err)
 	}
-	a.printf("\nCreated %s. Next:\n  cd %s\n  tringify theme preview\n", *name, dir)
+	resolved := dest
+	if r, err := filepath.EvalSymlinks(dest); err == nil {
+		resolved = r
+	}
+	trimmed, _ := themekit.ValidName(*name)
+	a.printf("Created %s: %s\n", trimmed, resolved)
+	a.println("Built and validated for import. Edit the source, then run build, check, or package.")
+	a.printf("\nNext:\n  cd %s\n  tringify theme preview\n", dir)
 	return nil
 }
 
-func (a *app) themeTool(ctx context.Context, command string, args []string) error {
-	tools, err := a.tools()
-	if err != nil {
-		return err
-	}
-	return tools.Run(ctx, ".", append([]string{command}, args...)...)
-}
-
-func (a *app) themePackage(ctx context.Context, args []string) error {
-	fs := newFlags("theme package [DIR] [--output FILE]", "Build, validate and write an upload-ready ZIP.")
-	output := fs.String("output", "", "ZIP path (default: dist/<theme>.zip)")
+func (a *app) themeBuild(_ context.Context, args []string) error {
+	fs := newFlags("theme build [DIR]", "Compile src/sections/<name>/ (body.html, style.css, schema.json) into sections/<name>.vasc and update the section list in theme.json.")
 	positional, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -98,29 +124,150 @@ func (a *app) themePackage(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	name, err := theme.Name(root)
+	names, err := themekit.Build(root)
+	if err != nil {
+		return fmt.Errorf("theme build failed: %w", err)
+	}
+	a.printf("built %d sections: %s\n", len(names), strings.Join(names, ", "))
+	return nil
+}
+
+func (a *app) themeCheck(ctx context.Context, args []string) error {
+	fs := newFlags("theme check [DIR] [--mode sealed|development]", "Validate the compiled theme, as it is, with the same rules used when a theme is uploaded. Run build first after editing src/.")
+	mode := modeFlag(fs)
+	checker := fs.String("checker", "", checkerHelp)
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if err := checkMode(*mode); err != nil {
+		return err
+	}
+	root, err := rootArg(positional)
+	if err != nil {
+		return err
+	}
+	sections, err := themekit.Validate(ctx, root, *mode, a.tools(*checker, ""))
+	if err != nil {
+		return fmt.Errorf("theme validation failed: %w", err)
+	}
+	a.printf("theme validation passed: %d source sections\n", len(sections))
+	return nil
+}
+
+func (a *app) themeContract(ctx context.Context, args []string) error {
+	fs := newFlags("theme contract", "Print the theme author contract as JSON: CTX roots and fields, editor setting types and hosted form actions.")
+	checker := fs.String("checker", "", checkerHelp)
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(positional) > 0 {
+		return fmt.Errorf("unexpected argument %q", positional[0])
+	}
+	contract, err := themekit.AuthorContract(ctx, a.tools(*checker, ""))
+	if err != nil {
+		return fmt.Errorf("theme contract failed: %w", err)
+	}
+	a.println(pyjson.DumpsUnicode(contract))
+	return nil
+}
+
+func (a *app) themeContext(ctx context.Context, args []string) error {
+	fs := newFlags("theme context [DIR] [--page PAGE] [--entity HANDLE] [--preset NAME]", "Print the exact sample data (CTX) the preview gives one page.")
+	page := fs.String("page", "home", "template page type")
+	entity := fs.String("entity", "", "product, collection, article, or page handle (default: the first in the demo pack)")
+	preset := fs.String("preset", "", "theme style preset name")
+	renderer := fs.String("renderer", "", rendererHelp)
+	checker := fs.String("checker", "", checkerHelp)
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	root, err := rootArg(positional)
+	if err != nil {
+		return err
+	}
+	payload, err := themekit.InspectContext(ctx, root, *page, *entity, *preset, a.tools(*checker, *renderer))
+	if err != nil {
+		return fmt.Errorf("theme context failed: %w", err)
+	}
+	a.println(pyjson.DumpsUnicode(payload))
+	return nil
+}
+
+func (a *app) themePreview(ctx context.Context, args []string) error {
+	fs := newFlags("theme preview [DIR] [--port 9292] [--preset NAME] [--host ADDRESS]", "Serve a local preview with sample content. It rebuilds in a temporary copy whenever the theme's sources change. Press Ctrl+C to stop.")
+	host := fs.String("host", "127.0.0.1", "specific IPv4 interface; pass this computer's LAN address to preview from another device")
+	port := fs.Int("port", 9292, "port")
+	preset := fs.String("preset", "", "theme style preset name")
+	renderer := fs.String("renderer", "", rendererHelp)
+	checker := fs.String("checker", "", checkerHelp)
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	root, err := rootArg(positional)
+	if err != nil {
+		return err
+	}
+	if err := themekit.Serve(ctx, root, *host, *port, *preset, a.tools(*checker, *renderer), a.stdout); err != nil {
+		return fmt.Errorf("theme preview failed: %w", err)
+	}
+	return nil
+}
+
+func (a *app) themePackage(ctx context.Context, args []string) error {
+	fs := newFlags("theme package [DIR] [OUTPUT] [--output FILE]", "Build the section sources in a temporary copy, validate the theme and write an upload-ready ZIP. A failed validation never replaces an existing package. Outputs inside the theme must be under dist/.")
+	output := fs.String("output", "", "ZIP path (default: dist/<theme>.zip)")
+	mode := modeFlag(fs)
+	checker := fs.String("checker", "", checkerHelp)
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if err := checkMode(*mode); err != nil {
+		return err
+	}
+	switch {
+	case len(positional) > 2 || (len(positional) == 2 && *output != ""):
+		return errors.New("theme packaging failed: expected [DIR] [OUTPUT], or [DIR] --output FILE")
+	case len(positional) == 2:
+		*output = positional[1]
+		positional = positional[:1]
+	case len(positional) == 1 && *output == "" && strings.EqualFold(filepath.Ext(positional[0]), ".zip"):
+		// The theme tools form: package OUTPUT, from the current directory.
+		*output = positional[0]
+		positional = nil
+	}
+	root, err := rootArg(positional)
 	if err != nil {
 		return err
 	}
 	if *output == "" {
+		name, err := theme.Name(root)
+		if err != nil {
+			return err
+		}
 		*output = filepath.Join(root, "dist", theme.Slug(name)+".zip")
 	}
 	out, err := filepath.Abs(*output)
 	if err != nil {
 		return err
 	}
-	return a.packageTo(ctx, root, out)
+	return a.packageTo(ctx, root, out, *mode, *checker)
 }
 
-func (a *app) packageTo(ctx context.Context, root, out string) error {
-	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-		return err
-	}
-	tools, err := a.tools()
+func (a *app) packageTo(ctx context.Context, root, out, mode, checker string) error {
+	count, err := themekit.Package(ctx, root, out, mode, a.tools(checker, ""))
 	if err != nil {
-		return err
+		return fmt.Errorf("theme packaging failed: %w", err)
 	}
-	return tools.Run(ctx, root, "package", root, out)
+	if resolved, err := filepath.EvalSymlinks(out); err == nil {
+		out = resolved
+	}
+	a.printf("packaged %d files: %s\n", count, out)
+	return nil
 }
 
 // packageTemp packages the theme into a temporary ZIP.
@@ -135,7 +282,7 @@ func (a *app) packageTemp(ctx context.Context, root string) (string, string, fun
 	}
 	cleanup := func() { os.RemoveAll(work) }
 	out := filepath.Join(work, theme.Slug(name)+".zip")
-	if err := a.packageTo(ctx, root, out); err != nil {
+	if err := a.packageTo(ctx, root, out, "sealed", ""); err != nil {
 		cleanup()
 		return "", "", nil, err
 	}
