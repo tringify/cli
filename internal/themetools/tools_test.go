@@ -22,17 +22,24 @@ func TestExpectedSum(t *testing.T) {
 	}
 }
 
-func TestUnzipRefusesPathsOutsideTheDestination(t *testing.T) {
+func TestExtractKeepsOnlyTheNamedFiles(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "bad.zip")
+	path := filepath.Join(dir, "tools.zip")
 	f, _ := os.Create(path)
 	w := zip.NewWriter(f)
-	entry, _ := w.Create("../escape.txt")
-	entry.Write([]byte("x"))
+	for _, name := range []string{"../escape.txt", "top/../../escape.txt", "top/themecheck", "top/theme.py", "other/theme-preview-render"} {
+		entry, _ := w.Create(name)
+		entry.Write([]byte(name))
+	}
 	w.Close()
 	f.Close()
-	if err := unzip(path, filepath.Join(dir, "out")); err == nil {
-		t.Fatal("path traversal accepted")
+	out := filepath.Join(dir, "out")
+	if err := extract(path, out, "top", []string{"themecheck", "theme-preview-render"}); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(out)
+	if len(entries) != 1 || entries[0].Name() != "themecheck" {
+		t.Fatalf("extracted %v", entries)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "escape.txt")); err == nil {
 		t.Fatal("file written outside the destination")

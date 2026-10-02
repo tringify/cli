@@ -70,8 +70,11 @@ func untar(r io.Reader, dest string) (string, error) {
 		if h.Typeflag == tar.TypeXGlobalHeader {
 			continue // GitHub archives start with a pax global header.
 		}
+		if strings.Contains(h.Name, "..") {
+			return "", fmt.Errorf("unsafe path %q in the starter archive", h.Name)
+		}
 		name := filepath.Clean(filepath.FromSlash(h.Name))
-		if name == "." || filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(os.PathSeparator)) {
+		if name == "." || filepath.IsAbs(name) {
 			return "", fmt.Errorf("unsafe path %q in the starter archive", h.Name)
 		}
 		top := strings.SplitN(name, string(os.PathSeparator), 2)[0]
