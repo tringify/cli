@@ -383,15 +383,17 @@ func extract(zipPath, dest, top string, names []string) error {
 		return err
 	}
 	defer zr.Close()
-	wanted := map[string]bool{}
+	// Output names come from names, never from the archive entry.
+	wanted := map[string]string{}
 	for _, n := range names {
-		wanted[top+"/"+n] = true
+		wanted[top+"/"+n] = n
 	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
 	}
 	for _, f := range zr.File {
-		if !wanted[f.Name] || f.Mode()&os.ModeSymlink != 0 || f.FileInfo().IsDir() {
+		base, ok := wanted[f.Name]
+		if !ok || f.Mode()&os.ModeSymlink != 0 || f.FileInfo().IsDir() {
 			continue
 		}
 		rc, err := f.Open()
@@ -399,7 +401,6 @@ func extract(zipPath, dest, top string, names []string) error {
 			return err
 		}
 		perm := os.FileMode(0o644)
-		base := path.Base(f.Name)
 		if base != "VERSION" && base != "LICENSE" {
 			perm = 0o755
 		}
