@@ -25,14 +25,22 @@ type storeTarget struct {
 }
 
 // storeTarget loads (or asks for) the store sign-in and picks the storefront.
-func (a *app) storeTarget(ctx context.Context, storeID, storefrontID string) (*storeTarget, error) {
+// extra names scopes beyond the usual store access that this command needs;
+// a saved login without them is replaced by one that has them.
+func (a *app) storeTarget(ctx context.Context, storeID, storefrontID string, extra ...string) (*storeTarget, error) {
 	session, err := a.session("store", storeID)
 	if err != nil {
 		return nil, err
 	}
+	if session != nil && !hasScopes(session.Account.Scope, extra) {
+		a.printf("Sign in to store %s again to allow adding sample products and their images.\n", storeID)
+		session = nil
+	}
 	if session == nil {
-		a.printf("Sign in to store %s to continue. Choose that store on the next screen.\n", storeID)
-		account, err := a.signIn(ctx, "store")
+		if len(extra) == 0 {
+			a.printf("Sign in to store %s to continue. Choose that store on the next screen.\n", storeID)
+		}
+		account, err := a.signInWith(ctx, "store", append(append([]string{}, auth.StoreScopes...), extra...))
 		if err != nil {
 			return nil, err
 		}
@@ -211,4 +219,19 @@ func (a *app) themePull(ctx context.Context, args []string) error {
 	a.printf("Downloaded %d files to %s.\n", count, dest)
 	a.println("These are compiled files: sections are .vasc, not src/. Edit them directly, or move sections into src/ to use theme build.")
 	return nil
+}
+
+// hasScopes reports whether a space-separated granted scope list includes
+// every wanted scope.
+func hasScopes(granted string, wanted []string) bool {
+	have := map[string]bool{}
+	for _, s := range strings.Fields(granted) {
+		have[s] = true
+	}
+	for _, s := range wanted {
+		if !have[s] {
+			return false
+		}
+	}
+	return true
 }
