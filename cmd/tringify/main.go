@@ -26,7 +26,7 @@ Usage:
 
 Account:
   login                 Sign in to a developer organization
-  login --store         Sign in to a store (for theme push)
+  login --store         Sign in to a store (for theme push and theme dev)
   logout                Sign out and revoke access
   whoami                Show who you are signed in as
 
@@ -39,8 +39,14 @@ Themes:
   theme context [DIR]   Print the sample data a preview page receives
   theme contract        Print the theme author contract as JSON
   theme push            Add the theme to a store as a new, unpublished theme
+  theme dev             Sync your edits into an unpublished theme on a store
+  theme pull            Download a store theme into a new directory
   theme listings        List your organization's theme listings
   theme publish         Publish the theme as a new version of a listing
+
+Development stores:
+  store list            List your organization's development stores
+  store create          Create a development store
 
 Other:
   version               Print the CLI version
@@ -106,6 +112,8 @@ func (a *app) run(ctx context.Context, args []string) error {
 		return a.whoami(ctx, args[1:])
 	case "theme":
 		return a.theme(ctx, args[1:])
+	case "store":
+		return a.store(ctx, args[1:])
 	case "version", "--version", "-v":
 		a.println("tringify " + version)
 		return nil
@@ -138,6 +146,10 @@ func (a *app) theme(ctx context.Context, args []string) error {
 		return a.themePackage(ctx, args[1:])
 	case "push":
 		return a.themePush(ctx, args[1:])
+	case "dev":
+		return a.themeDev(ctx, args[1:])
+	case "pull":
+		return a.themePull(ctx, args[1:])
 	case "listings":
 		return a.themeListings(ctx, args[1:])
 	case "publish":

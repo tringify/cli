@@ -4,6 +4,8 @@ package theme
 
 import (
 	"archive/tar"
+	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -185,4 +187,53 @@ func Changelog(notes, commit string) string {
 		return line
 	}
 	return notes + "\n\n" + line
+}
+
+// Unzip writes a theme package into dest, which must not exist yet. Only
+// regular files are written; paths that would leave dest are refused.
+func Unzip(data []byte, dest string) (int, error) {
+	if _, err := os.Lstat(dest); err == nil {
+		return 0, fmt.Errorf("%s already exists; choose a new directory", dest)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return 0, fmt.Errorf("the theme package is not a ZIP: %w", err)
+	}
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, f := range zr.File {
+		if strings.HasSuffix(f.Name, "/") || !f.Mode().IsRegular() {
+			continue
+		}
+		name := filepath.Clean(filepath.FromSlash(f.Name))
+		if strings.Contains(f.Name, "..") || name == "." || filepath.IsAbs(name) || strings.HasPrefix(name, string(os.PathSeparator)) {
+			os.RemoveAll(dest)
+			return 0, fmt.Errorf("unsafe path %q in the theme package", f.Name)
+		}
+		target := filepath.Join(dest, name)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return 0, err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return 0, err
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err != nil {
+			rc.Close()
+			return 0, err
+		}
+		_, err = io.Copy(out, io.LimitReader(rc, 64<<20))
+		rc.Close()
+		if closeErr := out.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			return 0, err
+		}
+		count++
+	}
+	return count, nil
 }

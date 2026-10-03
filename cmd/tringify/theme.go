@@ -14,7 +14,6 @@ import (
 
 	"github.com/tringify/cli/internal/auth"
 	"github.com/tringify/cli/internal/devapi"
-	"github.com/tringify/cli/internal/mcp"
 	"github.com/tringify/cli/internal/pyjson"
 	"github.com/tringify/cli/internal/theme"
 	"github.com/tringify/cli/internal/themekit"
@@ -330,101 +329,22 @@ func (a *app) themePush(ctx context.Context, args []string) error {
 		return err
 	}
 	if *storeID == "" {
-		return errors.New("--store is required. Find the ID in the store's admin URL or the Developer Portal")
+		return errors.New("--store is required. Find the ID with `tringify store list` or in the store's admin URL")
 	}
 	root, err := rootArg(positional)
 	if err != nil {
 		return err
 	}
-	session, err := a.session("store", *storeID)
+	target, err := a.storeTarget(ctx, *storeID, *storefrontID)
 	if err != nil {
 		return err
 	}
-	if session == nil {
-		a.printf("Sign in to store %s to continue. Choose that store on the next screen.\n", *storeID)
-		account, err := a.signIn(ctx, "store")
-		if err != nil {
-			return err
-		}
-		if account.Target.ID != *storeID {
-			return fmt.Errorf("you approved store %s (%s), not %s; run the command again and choose the right store", account.Target.Name, account.Target.ID, *storeID)
-		}
-		if session, err = a.session("store", *storeID); err != nil {
-			return err
-		}
-	}
-	client := mcp.New(a.mcpEndpoint("store"), session, version)
-	if *storefrontID == "" {
-		data, err := client.Call(ctx, "list_storefronts", nil)
-		if err != nil {
-			return err
-		}
-		list := items(data)
-		for _, sf := range list {
-			if sf["is_primary"] == true {
-				*storefrontID = str(sf["id"])
-			}
-		}
-		if *storefrontID == "" && len(list) == 1 {
-			*storefrontID = str(list[0]["id"])
-		}
-		if *storefrontID == "" {
-			return errors.New("could not choose a storefront; pass --storefront")
-		}
-	}
-	bundle, name, cleanup, err := a.packageTemp(ctx, root)
+	themeID, name, err := a.importTheme(ctx, target, root)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
-	info, err := os.Stat(bundle)
-	if err != nil {
-		return err
-	}
-	a.printf("Uploading %s (%d KB) to %s…\n", filepath.Base(bundle), (info.Size()+1023)/1024, session.Account.Target.Name)
-	data, err := client.Call(ctx, "create_theme_import_upload", map[string]any{"storefront_id": *storefrontID, "original_filename": filepath.Base(bundle), "size_bytes": info.Size()})
-	if err != nil {
-		return err
-	}
-	var grant upload.Grant
-	if err := decode(data, &grant); err != nil {
-		return err
-	}
-	if err := upload.Put(ctx, &http.Client{Timeout: 10 * time.Minute}, grant, bundle); err != nil {
-		return err
-	}
-	if _, err := client.Call(ctx, "finalize_theme_import_upload", map[string]any{"storefront_id": *storefrontID, "intent_id": grant.IntentID}); err != nil {
-		return err
-	}
-	uploadID, err := upload.Wait(ctx, func(ctx context.Context) (*upload.Status, error) {
-		data, err := client.Call(ctx, "get_theme_import_upload_status", map[string]any{"storefront_id": *storefrontID, "intent_id": grant.IntentID})
-		if err != nil {
-			return nil, err
-		}
-		var s upload.Status
-		return &s, decode(data, &s)
-	})
-	if err != nil {
-		return err
-	}
-	imported, err := client.Call(ctx, "import_theme", map[string]any{"storefront_id": *storefrontID, "upload_id": uploadID})
-	if err != nil {
-		return err
-	}
-	themeID := ""
-	if m, ok := imported.(map[string]any); ok {
-		themeID = str(m["id"])
-		if themeID == "" {
-			if t, ok := m["theme"].(map[string]any); ok {
-				themeID = str(t["id"])
-			}
-		}
-	}
-	a.printf("Added %s to %s as an unpublished theme", name, session.Account.Target.Name)
-	if themeID != "" {
-		a.printf(" (theme %s)", themeID)
-	}
-	a.println(". Preview and publish it from the store admin under Online Store → Themes.")
+	a.printf("Added %s to %s as an unpublished theme (theme %s).\n", name, target.session.Account.Target.Name, themeID)
+	a.println("Preview and publish it from the store admin under Online Store → Themes.")
 	return nil
 }
 

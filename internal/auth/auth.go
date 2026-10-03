@@ -26,7 +26,7 @@ import (
 // Scopes requested at sign-in. Each is limited to what your own role allows;
 // the consent screen shows exactly what is granted.
 var (
-	OrganizationScopes = []string{"connection:read", "organization:themes:read", "organization:themes:write"}
+	OrganizationScopes = []string{"connection:read", "organization:themes:read", "organization:themes:write", "organization:dev_stores:read", "organization:dev_stores:write"}
 	StoreScopes        = []string{"connection:read", "store:online_store.storefronts:read", "store:online_store.storefronts:write"}
 )
 
