@@ -2,6 +2,7 @@ package theme
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -83,5 +84,47 @@ func TestUntarAcceptsGitHubArchives(t *testing.T) {
 	}
 	if name, err := Name(root); err != nil || name != "Starter" {
 		t.Fatalf("%s %v", name, err)
+	}
+}
+
+func zipOf(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, body := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Write([]byte(body))
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestUnzipWritesANewDirectoryOnly(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "dawn")
+	count, err := Unzip(zipOf(t, map[string]string{"theme.json": "{}", "sections/hero.vasc": "hero"}), dest)
+	if err != nil || count != 2 {
+		t.Fatalf("unzip = %d, %v", count, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dest, "sections", "hero.vasc")); string(b) != "hero" {
+		t.Fatalf("hero = %q", b)
+	}
+	if _, err := Unzip(zipOf(t, map[string]string{"theme.json": "{}"}), dest); err == nil {
+		t.Fatal("an existing directory must be refused")
+	}
+}
+
+func TestUnzipRefusesPathsOutsideTheDirectory(t *testing.T) {
+	root := t.TempDir()
+	dest := filepath.Join(root, "theme")
+	if _, err := Unzip(zipOf(t, map[string]string{"../escape.txt": "x"}), dest); err == nil {
+		t.Fatal("a parent path was accepted")
+	}
+	if _, err := os.Stat(filepath.Join(root, "escape.txt")); err == nil {
+		t.Fatal("a file was written outside the directory")
 	}
 }
