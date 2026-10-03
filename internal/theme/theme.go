@@ -207,12 +207,11 @@ func Unzip(data []byte, dest string) (int, error) {
 		if strings.HasSuffix(f.Name, "/") || !f.Mode().IsRegular() {
 			continue
 		}
-		name := filepath.Clean(filepath.FromSlash(f.Name))
-		if strings.Contains(f.Name, "..") || name == "." || filepath.IsAbs(name) || strings.HasPrefix(name, string(os.PathSeparator)) {
+		target := filepath.Join(dest, filepath.FromSlash(f.Name))
+		if !strings.HasPrefix(target, filepath.Clean(dest)+string(os.PathSeparator)) {
 			os.RemoveAll(dest)
 			return 0, fmt.Errorf("unsafe path %q in the theme package", f.Name)
 		}
-		target := filepath.Join(dest, name)
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return 0, err
 		}
