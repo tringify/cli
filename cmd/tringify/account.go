@@ -18,15 +18,20 @@ func (a *app) mcpEndpoint(kind string) string { return a.authClient().Resource(k
 
 // signIn runs the browser flow and saves the resulting login.
 func (a *app) signIn(ctx context.Context, kind string) (*credentials.Account, error) {
+	scopes := auth.OrganizationScopes
+	if kind == "store" {
+		scopes = auth.StoreScopes
+	}
+	return a.signInWith(ctx, kind, scopes)
+}
+
+// signInWith signs in asking for exactly these scopes.
+func (a *app) signInWith(ctx context.Context, kind string, scopes []string) (*credentials.Account, error) {
 	store, err := credentials.Open()
 	if err != nil {
 		return nil, err
 	}
 	client := a.authClient()
-	scopes := auth.OrganizationScopes
-	if kind == "store" {
-		scopes = auth.StoreScopes
-	}
 	tokens, resource, err := client.Login(ctx, auth.LoginOptions{Kind: kind, Scopes: scopes, OpenBrowser: browser.Open, Print: a.println})
 	if err != nil {
 		return nil, err

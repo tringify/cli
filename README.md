@@ -75,7 +75,7 @@ Create the listing itself (name, category, pricing, support details) in the [Dev
 | `theme context [DIR] --page PAGE [--entity HANDLE] [--preset NAME]` | Prints the exact sample data (CTX) the preview gives a page, such as `home`, `product`, `collection` or `page`. |
 | `theme contract` | Prints the theme author contract as JSON: CTX roots and fields, editor setting types and hosted form actions. |
 | `theme push --store ID [--storefront ID] [DIR]` | Packages the theme and adds it to the store as a new, unpublished theme. The live theme is not changed. |
-| `theme dev --store ID [--storefront ID] [--theme ID] [DIR]` | Adds the theme to the store as an unpublished theme, then builds, validates and syncs it every time you save. The theme it uses is remembered in `.tringify/dev.json`; add `.tringify/` to your `.gitignore`. The store's published theme is never changed. |
+| `theme dev --store ID [--storefront ID] [--theme ID] [--with-demo] [DIR]` | Adds the theme to the store as an unpublished theme, then builds, validates and syncs it every time you save. The theme it uses is remembered in `.tringify/dev.json`; add `.tringify/` to your `.gitignore`. The store's published theme is never changed. `--with-demo` also adds the products and collections from `demo/catalog.json` to a development store, with their images; products the store already has are skipped. |
 | `theme pull --store ID --theme ID [DIR]` | Downloads a store theme's published files into a new directory. Without `--theme` it lists the storefront's themes. |
 | `store list` | Lists your organization's development stores and their IDs. |
 | `store create --name NAME --country CC --currency CUR` | Creates a development store and waits until it is ready. `--subdomain`, `--timezone` and `--billing-currency` are optional. |
@@ -96,7 +96,7 @@ If you used the `tringify-theme` command from the theme tools, every one of its 
 | Login | Access requested |
 | --- | --- |
 | Developer organization | View and edit your organization's themes, and list and create its development stores (`organization:themes:read`, `organization:themes:write`, `organization:dev_stores:read`, `organization:dev_stores:write`) |
-| Store | View and edit the store's storefront themes (`store:online_store.storefronts:read`, `store:online_store.storefronts:write`) |
+| Store | View and edit the store's storefront themes (`store:online_store.storefronts:read`, `store:online_store.storefronts:write`). With `theme dev --with-demo`, also add products and files (`store:products:write`, `store:files:write`). |
 
 The CLI never receives more access than your own role in that organization or store, and if your role changes, the CLI's access changes with it. It cannot change your live theme, delete stores, create listings, or change pricing. If you signed in before development store access was added, run `tringify login` again to use `store` commands.
 
