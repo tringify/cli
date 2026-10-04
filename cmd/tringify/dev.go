@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/tringify/cli/internal/auth"
 	"github.com/tringify/cli/internal/mcp"
 	"github.com/tringify/cli/internal/themekit"
 )
@@ -55,6 +56,7 @@ func (a *app) themeDev(ctx context.Context, args []string) error {
 	storefrontID := fs.String("storefront", "", "storefront ID (default: the store's primary storefront)")
 	themeFlag := fs.String("theme", "", "sync into this unpublished theme instead of the one theme dev added")
 	interval := fs.Duration("interval", time.Second, "how often to look for changes")
+	withDemo := fs.Bool("with-demo", false, "also add the theme's demo products and collections to the store (development stores only)")
 	positional, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -71,7 +73,11 @@ func (a *app) themeDev(ctx context.Context, args []string) error {
 	if *storefrontID == "" {
 		*storefrontID = saved.StorefrontID
 	}
-	target, err := a.storeTarget(ctx, *storeID, *storefrontID)
+	var extra []string
+	if *withDemo {
+		extra = auth.SampleContentScopes
+	}
+	target, err := a.storeTarget(ctx, *storeID, *storefrontID, extra...)
 	if err != nil {
 		return err
 	}
@@ -113,6 +119,14 @@ func (a *app) themeDev(ctx context.Context, args []string) error {
 	state.Stores[*storeID] = devTarget{StorefrontID: target.storefrontID, ThemeID: themeID}
 	if err := saveDevState(root, state); err != nil {
 		return err
+	}
+	if *withDemo {
+		if err := a.addSampleContent(ctx, target, root); err != nil {
+			if errors.Is(err, mcp.ErrUnauthorized) {
+				return err
+			}
+			a.printf("Sample products were not added: %v\n", err)
+		}
 	}
 	a.printf("Syncing into theme %s on %s. Preview it in the store admin under Online Store → Themes.\n", themeID, target.session.Account.Target.Name)
 	a.println("Watching for changes. Press Ctrl+C to stop.")

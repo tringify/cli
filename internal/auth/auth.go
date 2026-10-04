@@ -29,6 +29,8 @@ import (
 var (
 	OrganizationScopes = []string{"connection:read", "organization:themes:read", "organization:themes:write", "organization:dev_stores:read", "organization:dev_stores:write"}
 	StoreScopes        = []string{"connection:read", "store:online_store.storefronts:read", "store:online_store.storefronts:write"}
+	// SampleContentScopes are asked for only when adding sample products.
+	SampleContentScopes = []string{"store:products:write", "store:files:write"}
 )
 
 // ErrSignInRequired means the saved login can no longer be used.

@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -68,8 +67,9 @@ type backend interface {
 
 var errNotFound = errors.New("not found")
 
-// Open chooses the credential backend. TRINGIFY_CREDENTIALS_STORE=file forces
-// the file backend; otherwise the system keychain is used when it works.
+// Open uses the operating system's credential store: the macOS Keychain,
+// Windows Credential Manager, or the Secret Service on Linux. Tokens are kept
+// nowhere else.
 func Open() (*Store, error) {
 	dir, err := ConfigDir()
 	if err != nil {
@@ -78,13 +78,10 @@ func Open() (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	s := &Store{dir: dir}
-	if os.Getenv("TRINGIFY_CREDENTIALS_STORE") != "file" && keyringWorks() {
-		s.backend = keyringBackend{}
-	} else {
-		s.backend = &fileBackend{path: filepath.Join(dir, "credentials.json")}
+	if !keyringWorks() {
+		return nil, errors.New("no system keychain is available. The Tringify CLI keeps logins in the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux (such as GNOME Keyring or KWallet); start one and try again")
 	}
-	return s, nil
+	return &Store{dir: dir, backend: keyringBackend{}}, nil
 }
 
 // ConfigDir is ~/.config/tringify (or the platform equivalent), overridable
@@ -266,72 +263,4 @@ func (keyringBackend) delete(key string) error {
 		return errNotFound
 	}
 	return err
-}
-
-type fileBackend struct{ path string }
-
-func (f *fileBackend) name() string { return f.path }
-
-func (f *fileBackend) read() (map[string]string, error) {
-	info, err := os.Stat(f.path)
-	if errors.Is(err, os.ErrNotExist) {
-		return map[string]string{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	// Windows has no POSIX modes; the file lives in the user's profile.
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-		return nil, fmt.Errorf("%s is readable by other users; run chmod 600 on it", f.path)
-	}
-	raw, err := os.ReadFile(f.path)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]string{}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (f *fileBackend) get(key string) (string, error) {
-	all, err := f.read()
-	if err != nil {
-		return "", err
-	}
-	v, ok := all[key]
-	if !ok {
-		return "", errNotFound
-	}
-	return v, nil
-}
-
-func (f *fileBackend) set(key, value string) error {
-	all, err := f.read()
-	if err != nil {
-		return err
-	}
-	all[key] = value
-	raw, err := json.MarshalIndent(all, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writePrivate(f.path, raw)
-}
-
-func (f *fileBackend) delete(key string) error {
-	all, err := f.read()
-	if err != nil {
-		return err
-	}
-	if _, ok := all[key]; !ok {
-		return errNotFound
-	}
-	delete(all, key)
-	raw, err := json.MarshalIndent(all, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writePrivate(f.path, raw)
 }

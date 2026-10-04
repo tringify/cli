@@ -296,19 +296,13 @@ func decode(in any, out any) error {
 	return json.Unmarshal(raw, out)
 }
 
-// items finds the list in a response that is either a list or an object
-// holding one.
-func items(data any) []map[string]any {
-	var list []any
-	switch v := data.(type) {
-	case []any:
-		list = v
-	case map[string]any:
-		for _, key := range []string{"items", "storefronts", "listings", "themes", "data"} {
-			if l, ok := v[key].([]any); ok {
-				list = l
-				break
-			}
+// listAt returns the list a response documents: the response itself when
+// key is "", otherwise the field key of a response object.
+func listAt(data any, key string) []map[string]any {
+	list, _ := data.([]any)
+	if key != "" {
+		if m, ok := data.(map[string]any); ok {
+			list, _ = m[key].([]any)
 		}
 	}
 	out := []map[string]any{}
@@ -369,24 +363,16 @@ func (a *app) themeListings(ctx context.Context, args []string) error {
 	if err := api.Do(ctx, http.MethodGet, "/org/themes", nil, &data); err != nil {
 		return err
 	}
-	list := items(data)
+	// GET /org/themes without paging returns the listings as an array.
+	list := listAt(data, "")
 	if len(list) == 0 {
 		a.printf("No theme listings in %s. Create one in the Developer Portal under Themes.\n", session.Account.Target.Name)
 		return nil
 	}
 	for _, l := range list {
-		a.printf("%s  %s  %s\n", str(l["id"]), firstNonEmpty(str(l["name"]), str(l["slug"])), str(l["status"]))
+		a.printf("%s  %s  %s\n", str(l["id"]), str(l["name"]), str(l["status"]))
 	}
 	return nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func (a *app) themePublish(ctx context.Context, args []string) error {
@@ -453,7 +439,7 @@ func (a *app) themePublish(ctx context.Context, args []string) error {
 	if err := api.Do(ctx, http.MethodPost, "/org/themes/"+*listing+"/versions", body, &published); err != nil {
 		return err
 	}
-	versionID := firstNonEmpty(str(published["id"]), str(published["version_id"]))
+	versionID := str(published["version_id"])
 	a.printf("Published %s %s (source commit %s).\n", name, *versionFlag, source.Commit)
 	if *installStore != "" {
 		if versionID == "" {
