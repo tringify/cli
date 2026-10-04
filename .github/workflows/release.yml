@@ -24,5 +24,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS install.sh \
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS install.sh install.ps1 \
             --title "Tringify CLI $GITHUB_REF_NAME" --generate-notes --verify-tag

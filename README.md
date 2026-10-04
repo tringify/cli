@@ -12,9 +12,15 @@ curl -fsSL https://raw.githubusercontent.com/tringify/cli/main/install.sh | sh
 
 The script downloads the release for your platform, checks it against the published `SHA256SUMS`, and installs `tringify` in `~/.local/bin`. Set `TRINGIFY_CLI_VERSION` to install a specific release.
 
-Windows: download `tringify-windows-amd64.zip` from [Releases](https://github.com/tringify/cli/releases), check it against `SHA256SUMS`, and put `tringify.exe` on your `PATH`.
+Windows (PowerShell):
 
-Builds are available for macOS (Apple silicon and Intel), Linux (x86-64 and ARM64), and Windows (x86-64). To build from source: `go install github.com/tringify/cli/cmd/tringify@latest`.
+```powershell
+irm https://raw.githubusercontent.com/tringify/cli/main/install.ps1 | iex
+```
+
+The script checks the download against `SHA256SUMS`, installs `tringify.exe` in `%LOCALAPPDATA%\Programs\tringify` and adds that folder to your `PATH`. Set `TRINGIFY_CLI_VERSION` to install a specific release, or `TRINGIFY_CLI_BIN` to install somewhere else.
+
+Builds are available for macOS (Apple silicon and Intel), Linux (x86-64 and ARM64), and Windows (x86-64; Windows on Arm runs it too). To build from source: `go install github.com/tringify/cli/cmd/tringify@latest`.
 
 The CLI is a single binary and needs nothing else installed: no Python, Node.js or other runtime. The first time you check, package or preview a theme, it downloads the theme validator (`themecheck`) and preview renderer (`theme-preview-render`) from the [theme tools](https://github.com/tringify/theme-tools) release for your platform, verifies them against the release's `SHA256SUMS`, and keeps them in your user cache directory:
 
@@ -54,6 +60,7 @@ When the theme is ready, commit it and publish a version to your listing:
 ```sh
 git init && git add . && git commit -m "First version"
 tringify theme listings
+tringify theme diff --listing LISTING_ID       # what changes compared with the published version
 tringify theme publish --listing LISTING_ID --version 1.0.0 --notes "First release"
 ```
 
@@ -75,12 +82,14 @@ Create the listing itself (name, category, pricing, support details) in the [Dev
 | `theme context [DIR] --page PAGE [--entity HANDLE] [--preset NAME]` | Prints the exact sample data (CTX) the preview gives a page, such as `home`, `product`, `collection` or `page`. |
 | `theme contract` | Prints the theme author contract as JSON: CTX roots and fields, editor setting types and hosted form actions. |
 | `theme push --store ID [--storefront ID] [DIR]` | Packages the theme and adds it to the store as a new, unpublished theme. The live theme is not changed. |
-| `theme dev --store ID [--storefront ID] [--theme ID] [--with-demo] [DIR]` | Adds the theme to the store as an unpublished theme, then builds, validates and syncs it every time you save. The theme it uses is remembered in `.tringify/dev.json`; add `.tringify/` to your `.gitignore`. The store's published theme is never changed. `--with-demo` also adds the products and collections from `demo/catalog.json` to a development store, with their images; products the store already has are skipped. |
+| `theme dev --store ID [--storefront ID] [--theme ID] [--with-demo] [DIR]` | Adds the theme to the store as an unpublished theme, then builds, validates and syncs it every time you save. The theme it uses is remembered in `.tringify/dev.json`; add `.tringify/` to your `.gitignore`. The store's published theme is never changed. `--with-demo` also adds the products and collections from `demo/catalog.json` to a development store. Products and collections the store already has are skipped, and only the images of the ones it adds are uploaded. |
 | `theme pull --store ID --theme ID [DIR]` | Downloads a store theme's published files into a new directory. Without `--theme` it lists the storefront's themes. |
+| `theme pull --listing ID [--version X.Y.Z] [DIR]` | Downloads the exact package a version of your listing was published with (default: the newest published version) into a new directory. |
+| `theme diff --listing ID [--version X.Y.Z] [DIR]` | Packages the theme and lists the files that are added (`+`), changed (`~`) or removed (`-`) compared with a published version of your listing (default: the newest). |
 | `store list` | Lists your organization's development stores and their IDs. |
 | `store create --name NAME --country CC --currency CUR` | Creates a development store and waits until it is ready. `--subdomain`, `--timezone` and `--billing-currency` are optional. |
 | `theme listings` | Lists your organization's theme listings and their IDs. |
-| `theme publish --listing ID --version X.Y.Z [--notes TEXT] [--breaking] [--install-store ID] [DIR]` | Packages the theme and publishes it as a new version of the listing. |
+| `theme publish --listing ID --version X.Y.Z [--notes TEXT] [--breaking] [--install-store ID] [--yes] [DIR]` | Packages the theme, shows what changes compared with the newest published version, and publishes it as a new version of the listing once you confirm. Pass `--yes` to skip the question, for example in CI. |
 | `version` | Prints the CLI version. |
 
 Edit sections in `src/sections/<name>/` as `body.html`, `style.css` and `schema.json`, with shared styles in `src/_shared.css`, or write `sections/*.vasc` files directly. Keep `src/.generated-sections.json` in version control: it records which section files the build generated, so removing a section's source also removes its compiled file safely, and a compiled file you edited by hand is never deleted.

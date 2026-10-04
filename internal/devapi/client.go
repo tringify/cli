@@ -54,6 +54,50 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, out any)
 			return err
 		}
 	}
+	return c.send(ctx, method, path, payload, "application/json", func(resp *http.Response) error {
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		if err != nil || len(raw) == 0 {
+			return err
+		}
+		var envelope struct {
+			Success *bool           `json:"success"`
+			Data    json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return fmt.Errorf("the Developer API returned an unreadable reply: %w", err)
+		}
+		if envelope.Success != nil && !*envelope.Success {
+			return apiError(resp.StatusCode, raw)
+		}
+		if out == nil || len(envelope.Data) == 0 {
+			return nil
+		}
+		return json.Unmarshal(envelope.Data, out)
+	})
+}
+
+// Download fetches a binary reply, such as a theme package, with its headers.
+// Errors are reported the same way as Do's.
+func (c *Client) Download(ctx context.Context, path string, limit int64) ([]byte, http.Header, error) {
+	var raw []byte
+	var header http.Header
+	err := c.send(ctx, http.MethodGet, path, nil, "application/zip", func(resp *http.Response) error {
+		var err error
+		if raw, err = io.ReadAll(io.LimitReader(resp.Body, limit+1)); err != nil {
+			return err
+		}
+		if int64(len(raw)) > limit {
+			return fmt.Errorf("the download is larger than %d MB", limit>>20)
+		}
+		header = resp.Header
+		return nil
+	})
+	return raw, header, err
+}
+
+// send makes the request with a fresh access token, retrying once with a
+// refreshed token on 401, and hands a successful (2xx) response to read.
+func (c *Client) send(ctx context.Context, method, path string, payload []byte, accept string, read func(*http.Response) error) error {
 	for attempt := 0; attempt < 2; attempt++ {
 		var token string
 		var err error
@@ -71,48 +115,50 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, out any)
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("X-Organization-ID", c.OrganizationID)
-		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Accept", accept)
 		req.Header.Set("User-Agent", "tringify-cli/"+c.Version)
-		if body != nil {
+		if payload != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
 		resp, err := c.HTTP.Do(req)
 		if err != nil {
 			return err
 		}
-		raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-		resp.Body.Close()
-		if err != nil {
-			return err
-		}
 		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 {
+			resp.Body.Close()
 			continue
 		}
-		var envelope struct {
-			Success *bool           `json:"success"`
-			Data    json.RawMessage `json:"data"`
-			Code    string          `json:"code"`
-			Message string          `json:"message"`
-			Error   *struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(raw, &envelope)
-		if resp.StatusCode >= 400 || (envelope.Success != nil && !*envelope.Success) {
-			e := &Error{Status: resp.StatusCode, Code: envelope.Code, Message: envelope.Message}
-			if envelope.Error != nil {
-				e.Code, e.Message = envelope.Error.Code, envelope.Error.Message
-			}
+		if resp.StatusCode >= 400 {
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
+			e := apiError(resp.StatusCode, raw)
 			if resp.StatusCode == http.StatusUnauthorized {
 				return errors.Join(mcp.ErrUnauthorized, e)
 			}
 			return e
 		}
-		if out == nil || len(envelope.Data) == 0 {
-			return nil
-		}
-		return json.Unmarshal(envelope.Data, out)
+		err = read(resp)
+		resp.Body.Close()
+		return err
 	}
 	return mcp.ErrUnauthorized
+}
+
+// apiError reads the API's error reply: {"error":{"code","message"}} or a
+// top-level code and message.
+func apiError(status int, raw []byte) *Error {
+	var envelope struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Error   *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(raw, &envelope)
+	e := &Error{Status: status, Code: envelope.Code, Message: envelope.Message}
+	if envelope.Error != nil {
+		e.Code, e.Message = envelope.Error.Code, envelope.Error.Message
+	}
+	return e
 }
