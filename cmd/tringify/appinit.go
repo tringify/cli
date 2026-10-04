@@ -39,8 +39,9 @@ func (a *app) appInit(ctx context.Context, args []string) error {
 		return err
 	}
 	var details struct {
-		Name string `json:"name"`
-		Slug string `json:"slug"`
+		Name     string `json:"name"`
+		Slug     string `json:"slug"`
+		ClientID string `json:"client_id"`
 	}
 	if err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(*appFlag), nil, &details); err != nil {
 		return appAccess(err)
@@ -71,7 +72,7 @@ func (a *app) appInit(ctx context.Context, args []string) error {
 		os.RemoveAll(dest)
 		return err
 	}
-	if err := writeStarterSettings(dest, *appFlag, details.Slug, config); err != nil {
+	if err := writeStarterSettings(dest, *appFlag, details.ClientID, details.Slug, config); err != nil {
 		os.RemoveAll(dest)
 		return err
 	}
@@ -83,19 +84,20 @@ Next:
   npm run db:migrate:local
   npm run dev
 
-Before running it, copy your webhook signing secret into .dev.vars as
-TRINGIFY_WEBHOOK_SECRET. It is shown when you generate or rotate it in the
-Developer Portal: Apps > %s > Webhooks > Signing Key.
+Before running it, copy two secrets from the Developer Portal into .dev.vars:
+  TRINGIFY_CLIENT_SECRET   Apps > %s > Credentials
+  TRINGIFY_WEBHOOK_SECRET  Apps > %s > Webhooks > Signing Key
+Each is shown when you create or regenerate it.
 
 %s holds the app's configuration. Edit it, then run
 `+"`tringify app config push`"+`. The README explains deploying the Worker.
-`, dest, details.Name, dir, details.Name, appconfig.FileName)
+`, dest, details.Name, dir, details.Name, details.Name, appconfig.FileName)
 	return nil
 }
 
 // writeStarterSettings points the starter at this app: its configuration,
 // the Worker's name and app ID, and a .dev.vars with a fresh encryption key.
-func writeStarterSettings(dest, appID, slug string, config []byte) error {
+func writeStarterSettings(dest, appID, clientID, slug string, config []byte) error {
 	if err := os.WriteFile(filepath.Join(dest, appconfig.FileName), config, 0o644); err != nil {
 		return err
 	}
@@ -109,6 +111,7 @@ func writeStarterSettings(dest, appID, slug string, config []byte) error {
 		{`"name": "my-tringify-app"`, `"name": "` + slug + `"`},
 		{`"database_name": "my-tringify-app"`, `"database_name": "` + slug + `"`},
 		{`"TRINGIFY_APP_ID": ""`, `"TRINGIFY_APP_ID": "` + appID + `"`},
+		{`"TRINGIFY_CLIENT_ID": ""`, `"TRINGIFY_CLIENT_ID": "` + clientID + `"`},
 	} {
 		if !strings.Contains(text, r.from) {
 			return errors.New("the app starter's wrangler.jsonc has an unexpected layout; update the CLI")
@@ -123,6 +126,8 @@ func writeStarterSettings(dest, appID, slug string, config []byte) error {
 		return err
 	}
 	vars := "# Local secrets for `npm run dev`. Never commit this file.\n" +
+		"# Client secret: Developer Portal > Apps > your app > Credentials.\n" +
+		"TRINGIFY_CLIENT_SECRET=\n" +
 		"# Webhook signing secret: Developer Portal > Apps > your app > Webhooks > Signing Key.\n" +
 		"TRINGIFY_WEBHOOK_SECRET=\n" +
 		"# Encrypts stored access tokens. Use a different key in production.\n" +

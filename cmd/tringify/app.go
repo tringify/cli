@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tringify/cli/internal/appconfig"
@@ -38,6 +39,8 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 		return errors.New("usage: tringify app config pull|push")
 	case "release":
 		return a.appRelease(ctx, args[1:])
+	case "install-link":
+		return a.appInstallLink(ctx, args[1:])
 	case "versions":
 		return a.appVersions(ctx, args[1:])
 	case "publish":
@@ -113,7 +116,7 @@ func (a *app) appList(ctx context.Context, args []string) error {
 		return nil
 	}
 	for _, item := range data.Apps {
-		a.printf("%s  %s  %s  %s\n", str(item["id"]), str(item["name"]), str(item["app_type"]), str(item["submission_status"]))
+		a.printf("%s  %s  %s  %s  %s\n", str(item["id"]), str(item["name"]), str(item["app_type"]), str(item["distribution"]), str(item["submission_status"]))
 	}
 	return nil
 }
@@ -218,7 +221,7 @@ func (a *app) appConfigPush(ctx context.Context, args []string) error {
 	if err := api.Do(ctx, http.MethodPut, "/apps/"+url.PathEscape(appID)+"/config", json.RawMessage(raw), &saved); err != nil {
 		return appAccess(err)
 	}
-	a.println("Saved the draft. Release it with `tringify app release --bump patch|minor|major`.")
+	a.println("Saved the draft. Release it with `tringify app release`.")
 	// The saved draft is normalized (sorted scopes, the admin URL's origin
 	// added to App Bridge origins). Keep the file identical to it.
 	formatted, err := appconfig.Format(saved)
@@ -266,17 +269,35 @@ func (a *app) listAppVersions(ctx context.Context, api *devapi.Client, appID str
 	return data.Versions, nil
 }
 
+// stringList is a flag that can be given more than once.
+type stringList []string
+
+func (l *stringList) String() string     { return strings.Join(*l, ",") }
+func (l *stringList) Set(v string) error { *l = append(*l, v); return nil }
+
+// appDistribution is "private" or "marketplace".
+func (a *app) appDistribution(ctx context.Context, api *devapi.Client, appID string) (string, error) {
+	var details struct {
+		Distribution string `json:"distribution"`
+	}
+	if err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID), nil, &details); err != nil {
+		return "", appAccess(err)
+	}
+	return details.Distribution, nil
+}
+
 func (a *app) appRelease(ctx context.Context, args []string) error {
-	fs := newFlags("app release --bump patch|minor|major [--notes TEXT]", "Submit the app's draft as a new version. The version number is the previous one with the part you name increased; use major for changes that need stores to approve new access.")
+	fs := newFlags("app release [--bump patch|minor|major] [--store ID]... [--notes TEXT]", "Release the app's draft. A marketplace app submits it as a new version: the previous version number with the part you name in --bump increased, where major marks the version as breaking. A private app sends it as an update to the installed stores you name with --store, or to all of them with --all; each store accepts it in its admin.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
-	bump := fs.String("bump", "", "patch, minor or major")
+	bump := fs.String("bump", "", "marketplace apps: patch, minor or major")
 	notes := fs.String("notes", "", "release notes shown to stores")
+	var stores stringList
+	fs.Var(&stores, "store", "private apps: an installed store to update (repeatable)")
+	all := fs.Bool("all", false, "private apps: update every installed store")
+	yes := fs.Bool("yes", false, "private apps: send without asking")
 	if _, err := parse(fs, args); err != nil {
 		return err
-	}
-	if *bump != "patch" && *bump != "minor" && *bump != "major" {
-		return errors.New("--bump must be patch, minor or major")
 	}
 	appID, err := appTarget(*appFlag, *file)
 	if err != nil {
@@ -297,6 +318,22 @@ func (a *app) appRelease(ctx context.Context, args []string) error {
 			return fmt.Errorf("%s differs from the draft. Run `tringify app config push` first", *file)
 		}
 	}
+	distribution, err := a.appDistribution(ctx, api, appID)
+	if err != nil {
+		return err
+	}
+	if distribution == "private" {
+		if *bump != "" {
+			return errors.New("--bump is for marketplace apps; private updates are numbered for you")
+		}
+		return a.sendPrivateUpdate(ctx, api, appID, stores, *all, *notes, *yes)
+	}
+	if len(stores) > 0 || *all {
+		return errors.New("--store and --all are for private apps; a marketplace version reaches stores once it is published")
+	}
+	if *bump != "patch" && *bump != "minor" && *bump != "major" {
+		return errors.New("--bump must be patch, minor or major")
+	}
 	body := map[string]string{"bump": *bump, "release_notes": *notes}
 	if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/submit", body, nil); err != nil {
 		return appAccess(err)
@@ -316,6 +353,84 @@ func (a *app) appRelease(ctx context.Context, args []string) error {
 	return nil
 }
 
+type privateUpdatePreview struct {
+	SnapshotSHA256 string `json:"snapshot_sha256"`
+	Installations  []struct {
+		StoreID          string `json:"store_id"`
+		StoreName        string `json:"store_name"`
+		InstalledVersion string `json:"installed_version"`
+		SnapshotSHA256   string `json:"snapshot_sha256"`
+		PendingVersion   string `json:"pending_version"`
+		PendingSHA256    string `json:"pending_sha256"`
+	} `json:"installations"`
+	Versions []struct {
+		Version  string `json:"version"`
+		Notes    string `json:"release_notes"`
+		Pending  int    `json:"pending"`
+		Accepted int    `json:"accepted"`
+	} `json:"versions"`
+}
+
+func (a *app) privateUpdates(ctx context.Context, api *devapi.Client, appID string) (privateUpdatePreview, error) {
+	var preview privateUpdatePreview
+	err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID)+"/private-updates", nil, &preview)
+	return preview, appAccess(err)
+}
+
+func (a *app) sendPrivateUpdate(ctx context.Context, api *devapi.Client, appID string, stores []string, all bool, notes string, yes bool) error {
+	preview, err := a.privateUpdates(ctx, api, appID)
+	if err != nil {
+		return err
+	}
+	if len(preview.Installations) == 0 {
+		return errors.New("no store has installed the app yet. Create an install link with `tringify app install-link`")
+	}
+	installed := map[string]string{}
+	var targets []string
+	for _, install := range preview.Installations {
+		installed[install.StoreID] = install.StoreName
+		current := install.SnapshotSHA256 == preview.SnapshotSHA256 || install.PendingSHA256 == preview.SnapshotSHA256
+		if all && !current {
+			targets = append(targets, install.StoreID)
+		}
+	}
+	for _, id := range stores {
+		if _, ok := installed[id]; !ok {
+			return fmt.Errorf("store %s has not installed the app", id)
+		}
+		targets = append(targets, id)
+	}
+	if !all && len(stores) == 0 {
+		a.println("Installed stores:")
+		for _, install := range preview.Installations {
+			a.printf("  %s  %s  %s\n", install.StoreID, install.StoreName, install.InstalledVersion)
+		}
+		return errors.New("name the stores to update with --store ID, or use --all")
+	}
+	if len(targets) == 0 {
+		a.println("Every installed store already has this draft or has it waiting for approval.")
+		return nil
+	}
+	if !yes {
+		ok, err := confirmWith(a.stdin, a.stdout, fmt.Sprintf("Send the draft to %d store(s)?", len(targets)), "Pass --yes to send without confirming")
+		if err != nil || !ok {
+			if err == nil {
+				a.println("Nothing sent.")
+			}
+			return err
+		}
+	}
+	body := map[string]any{"snapshot_sha256": preview.SnapshotSHA256, "store_ids": targets, "release_notes": notes}
+	var sent struct {
+		Version string `json:"version"`
+	}
+	if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/private-updates", body, &sent); err != nil {
+		return appAccess(err)
+	}
+	a.printf("Sent version %s to %d store(s). Each store accepts the update in its admin.\n", sent.Version, len(targets))
+	return nil
+}
+
 func (a *app) appVersions(ctx context.Context, args []string) error {
 	fs := newFlags("app versions", "List the app's versions, newest first.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
@@ -330,6 +445,23 @@ func (a *app) appVersions(ctx context.Context, args []string) error {
 	api, _, err := a.devAPI()
 	if err != nil {
 		return err
+	}
+	distribution, err := a.appDistribution(ctx, api, appID)
+	if err != nil {
+		return err
+	}
+	if distribution == "private" {
+		preview, err := a.privateUpdates(ctx, api, appID)
+		if err != nil {
+			return err
+		}
+		if len(preview.Versions) == 0 {
+			a.println("No updates sent yet. Stores that install from a link get the draft as it is then.")
+		}
+		for _, v := range preview.Versions {
+			a.printf("%-10s %d accepted, %d waiting\n", v.Version, v.Accepted, v.Pending)
+		}
+		return nil
 	}
 	versions, err := a.listAppVersions(ctx, api, appID, 50)
 	if err != nil {
@@ -462,5 +594,49 @@ func (a *app) appDeliveries(ctx context.Context, args []string) error {
 	if data.Total > len(data.Deliveries) {
 		a.printf("Showing %d of %d.\n", len(data.Deliveries), data.Total)
 	}
+	return nil
+}
+
+func (a *app) appInstallLink(ctx context.Context, args []string) error {
+	fs := newFlags("app install-link [--store DOMAIN] [--draft] [--expires 7d] [--uses 1]", "Create a link that installs the app on a store. A private app installs its current draft. A marketplace app installs its published version, or with --draft its current draft, which only development and transfer stores of your organization can install.")
+	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
+	file := fs.String("file", appconfig.FileName, "configuration file")
+	store := fs.String("store", "", "only this store may use the link, for example my-store.mytringify.com")
+	draft := fs.Bool("draft", false, "marketplace apps: install the current draft instead of the published version")
+	expires := fs.String("expires", "7d", "how long the link works: 24h, 7d, 30d, 90d or never")
+	uses := fs.Int("uses", 1, "how many installs the link allows; 0 for unlimited")
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	appID, err := appTarget(*appFlag, *file)
+	if err != nil {
+		return err
+	}
+	api, _, err := a.devAPI()
+	if err != nil {
+		return err
+	}
+	distribution, err := a.appDistribution(ctx, api, appID)
+	if err != nil {
+		return err
+	}
+	mode := "approved_release"
+	if distribution == "private" || *draft {
+		mode = "development_release"
+	}
+	body := map[string]any{"release_mode": mode, "expires_in": *expires}
+	if *uses > 0 {
+		body["max_uses"] = *uses
+	}
+	if *store != "" {
+		body["store_domain"] = *store
+	}
+	var link struct {
+		InstallURL string `json:"install_url"`
+	}
+	if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/install-tokens", body, &link); err != nil {
+		return appAccess(err)
+	}
+	a.println(link.InstallURL)
 	return nil
 }

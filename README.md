@@ -76,8 +76,15 @@ tringify app init --app APP_ID          # project from the app starter, with tri
 # edit tringify.app.json: scopes, webhook URL, admin URL, events
 tringify app config push                # shows what changes, then replaces the draft
 tringify app webhook test               # sends a signed app.test webhook
-tringify app release --bump minor --notes "First release"
-tringify app publish 1.0.0              # once the version is approved
+tringify app install-link --store my-store.mytringify.com
+```
+
+A marketplace app then releases versions; a private app sends updates to stores that installed it:
+
+```sh
+tringify app release --bump minor --notes "First release"   # marketplace
+tringify app publish 1.0.0                                   # once approved
+tringify app release --all --notes "New settings page"       # private
 ```
 
 `tringify.app.json` holds everything a release carries except the listing (name, descriptions, screenshots, pricing), which stays in the Developer Portal. Pushing replaces the whole draft: a field you delete from the file is cleared. Stores only see a change once you release a version and publish it.
@@ -107,11 +114,12 @@ tringify app publish 1.0.0              # once the version is approved
 | `theme listings` | Lists your organization's theme listings and their IDs. |
 | `theme publish --listing ID --version X.Y.Z [--notes TEXT] [--breaking] [--install-store ID] [--yes] [DIR]` | Packages the theme, shows what changes compared with the newest published version, and publishes it as a new version of the listing once you confirm. Pass `--yes` to skip the question, for example in CI. |
 | `app list` | Lists your organization's apps and their IDs. |
-| `app init --app ID [DIR]` | Creates a project from [app-starter](https://github.com/tringify/app-starter) in a new directory (default: the app's slug), writes the app's configuration to `tringify.app.json` and creates `.dev.vars` for local development. |
+| `app init --app ID [DIR]` | Creates a project from [app-starter](https://github.com/tringify/app-starter) in a new directory (default: the app's slug), writes the app's configuration to `tringify.app.json`, sets the app and client IDs, and creates `.dev.vars` for local development. Copy the client secret and webhook signing secret into it from the Developer Portal. |
 | `app config pull [--app ID] [--file PATH] [--yes]` | Writes the app's draft configuration to `tringify.app.json`. If the file exists and differs, shows the differences and asks first. |
 | `app config push [--file PATH] [--yes]` | Shows the fields that differ from the draft and, once you confirm, replaces the draft with the file. Unknown fields are refused. The saved values are written back to the file when the platform normalizes them, for example sorting scopes. |
-| `app release --bump patch\|minor\|major [--notes TEXT]` | Submits the draft as a new version. Refuses while `tringify.app.json` differs from the draft. |
-| `app versions` | Lists the app's versions and their review status. |
+| `app install-link [--store DOMAIN] [--draft] [--expires 7d] [--uses 1]` | Prints a link that installs the app on a store. A private app installs its current draft; a marketplace app installs its published version, or with `--draft` its draft (development and transfer stores of your organization only). |
+| `app release [--bump patch\|minor\|major] [--store ID]... [--all] [--notes TEXT]` | Releases the draft. A marketplace app submits it as a new version (`--bump`). A private app sends it as an update to the installed stores you name, or `--all` of them; each store accepts it in its admin. Refuses while `tringify.app.json` differs from the draft. |
+| `app versions` | Lists the app's versions and their review status, or for a private app, the updates sent and how many stores accepted them. |
 | `app publish VERSION` | Publishes an approved version so stores can install it or update to it. |
 | `app webhook test` | Sends a signed `app.test` webhook to the app's webhook URL and reports what your endpoint answered. |
 | `app deliveries [--status STATUS] [--limit N]` | Lists recent webhook deliveries with their status, attempts and your endpoint's last answer. |
