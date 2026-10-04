@@ -6,13 +6,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"runtime"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/tringify/cli/internal/credentials"
+	"github.com/zalando/go-keyring"
 )
 
 // The expected value is BASE64URL(SHA256(verifier)) without padding,
@@ -123,7 +124,7 @@ func TestLoginRejectsAForgedState(t *testing.T) {
 func TestRefreshRotatesAndPersists(t *testing.T) {
 	_, server := newFake(t)
 	t.Setenv("TRINGIFY_CONFIG_DIR", t.TempDir())
-	t.Setenv("TRINGIFY_CREDENTIALS_STORE", "file")
+	keyring.MockInit() // an in-memory system keychain
 	store, err := credentials.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -155,8 +156,12 @@ func TestRefreshRotatesAndPersists(t *testing.T) {
 	if _, err := c.Refresh(context.Background(), &stale); err != ErrSignInRequired {
 		t.Fatalf("reused refresh token: %v", err)
 	}
-	info, err := os.Stat(os.Getenv("TRINGIFY_CONFIG_DIR") + "/credentials.json")
-	if err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o600) {
-		t.Fatalf("credentials file mode: %v %v", info.Mode(), err)
+	// Tokens live only in the keychain; nothing in the config folder holds one.
+	entries, _ := os.ReadDir(os.Getenv("TRINGIFY_CONFIG_DIR"))
+	for _, entry := range entries {
+		raw, _ := os.ReadFile(filepath.Join(os.Getenv("TRINGIFY_CONFIG_DIR"), entry.Name()))
+		if strings.Contains(string(raw), "tcoa_") || strings.Contains(string(raw), "tcor_") {
+			t.Fatalf("%s holds a token", entry.Name())
+		}
 	}
 }

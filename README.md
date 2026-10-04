@@ -100,7 +100,7 @@ If you used the `tringify-theme` command from the theme tools, every one of its 
 
 The CLI never receives more access than your own role in that organization or store, and if your role changes, the CLI's access changes with it. It cannot change your live theme, delete stores, create listings, or change pricing. If you signed in before development store access was added, run `tringify login` again to use `store` commands.
 
-Sign-in uses OAuth with PKCE and a one-time listener on `127.0.0.1`, so your password never passes through the CLI. Access tokens last 15 minutes and are refreshed automatically; refresh tokens rotate on every use. Tokens are kept in your system keychain (macOS Keychain, Windows Credential Manager, or the Secret Service on Linux). Where no keychain is available, they are stored in `~/.config/tringify/credentials.json`, readable only by you. Set `TRINGIFY_CREDENTIALS_STORE=file` to use the file on purpose.
+Sign-in uses OAuth with PKCE and a one-time listener on `127.0.0.1`, so your password never passes through the CLI. Access tokens last 15 minutes and are refreshed automatically; refresh tokens rotate on every use. Tokens are kept only in your system keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux (GNOME Keyring, KWallet). Without one, sign-in stops and says so.
 
 You can see and disconnect the CLI's access at any time in your Tringify account under **Connected tools**, or run `tringify logout`.
 
