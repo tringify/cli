@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/tringify/cli/internal/mcp"
@@ -173,6 +174,17 @@ func apiError(status int, raw []byte) *Error {
 	// one-line error.
 	if text, ok := details.(string); ok {
 		e.Detail = text
+	}
+	// A reply that is not the API's error format (from a proxy, say) is shown
+	// as the start of its text, so the failure can still be reported.
+	if e.Message == "" && e.Code == "" {
+		text := strings.Join(strings.Fields(string(raw)), " ")
+		if len(text) > 200 {
+			text = text[:200] + "..."
+		}
+		if text != "" {
+			e.Message = fmt.Sprintf("request failed (HTTP %d): %s", status, text)
+		}
 	}
 	return e
 }

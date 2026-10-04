@@ -50,7 +50,8 @@ Apps:
   app init              Create a project for an app from the app starter
   app config pull       Write the app's configuration to tringify.app.json
   app config push       Replace the app's draft configuration with tringify.app.json
-  app release           Submit the draft as a new version
+  app install-link      Create a link that installs the app on a store
+  app release           Release the draft: a new version, or a private app update
   app versions          List the app's versions
   app publish VERSION   Publish an approved version
   app webhook test      Send a test webhook to the app's webhook URL

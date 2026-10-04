@@ -66,19 +66,19 @@ func TestWriteStarterSettingsPointsTheStarterAtTheApp(t *testing.T) {
 	os.WriteFile(filepath.Join(dest, "wrangler.jsonc"), []byte(`{
   "name": "my-tringify-app",
   "d1_databases": [{ "database_name": "my-tringify-app" }],
-  "vars": { "TRINGIFY_APP_ID": "" }
+  "vars": { "TRINGIFY_APP_ID": "", "TRINGIFY_CLIENT_ID": "" }
 }`), 0o644)
-	if err := writeStarterSettings(dest, "app-1", "rocket", []byte("{}\n")); err != nil {
+	if err := writeStarterSettings(dest, "app-1", "app_client", "rocket", []byte("{}\n")); err != nil {
 		t.Fatal(err)
 	}
 	wrangler, _ := os.ReadFile(filepath.Join(dest, "wrangler.jsonc"))
-	for _, want := range []string{`"name": "rocket"`, `"database_name": "rocket"`, `"TRINGIFY_APP_ID": "app-1"`} {
+	for _, want := range []string{`"name": "rocket"`, `"database_name": "rocket"`, `"TRINGIFY_APP_ID": "app-1"`, `"TRINGIFY_CLIENT_ID": "app_client"`} {
 		if !strings.Contains(string(wrangler), want) {
 			t.Fatalf("wrangler.jsonc lacks %s:\n%s", want, wrangler)
 		}
 	}
 	vars, _ := os.ReadFile(filepath.Join(dest, ".dev.vars"))
-	if !strings.Contains(string(vars), "TRINGIFY_WEBHOOK_SECRET=\n") || !strings.Contains(string(vars), "TOKEN_ENCRYPTION_KEY=") {
+	if !strings.Contains(string(vars), "TRINGIFY_WEBHOOK_SECRET=\n") || !strings.Contains(string(vars), "TRINGIFY_CLIENT_SECRET=\n") || !strings.Contains(string(vars), "TOKEN_ENCRYPTION_KEY=") {
 		t.Fatalf(".dev.vars = %s", vars)
 	}
 	// Windows has no Unix permission bits.
@@ -86,7 +86,7 @@ func TestWriteStarterSettingsPointsTheStarterAtTheApp(t *testing.T) {
 		t.Fatalf(".dev.vars mode = %v", info.Mode().Perm())
 	}
 	os.WriteFile(filepath.Join(dest, "wrangler.jsonc"), []byte(`{}`), 0o644)
-	if err := writeStarterSettings(dest, "app-1", "rocket", []byte("{}\n")); err == nil {
+	if err := writeStarterSettings(dest, "app-1", "app_client", "rocket", []byte("{}\n")); err == nil {
 		t.Fatal("an unexpected wrangler.jsonc was accepted")
 	}
 }
