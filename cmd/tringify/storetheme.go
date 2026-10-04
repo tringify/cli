@@ -148,16 +148,27 @@ func (a *app) storeTheme(ctx context.Context, t *storeTarget, themeID string) (m
 }
 
 func (a *app) themePull(ctx context.Context, args []string) error {
-	fs := newFlags("theme pull --store STORE_ID --theme THEME_ID [--storefront ID] [DIR]", "Download a store theme's published files into a new directory. Use it to start from a theme that was changed in the store admin.")
-	storeID := fs.String("store", "", "store ID (required)")
-	themeID := fs.String("theme", "", "theme ID (required; see the store admin URL, or omit to list the themes)")
+	fs := newFlags("theme pull --store STORE_ID --theme THEME_ID [--storefront ID] [DIR]\n       tringify theme pull --listing ID [--version X.Y.Z] [DIR]", "Download a store theme's published files, or the exact package a version of your listing was published with, into a new directory.")
+	storeID := fs.String("store", "", "store ID")
+	themeID := fs.String("theme", "", "theme ID (see the store admin URL, or omit to list the store's themes)")
 	storefrontID := fs.String("storefront", "", "storefront ID (default: the store's primary storefront)")
+	listing := fs.String("listing", "", "theme listing ID, to download a published version instead of a store theme")
+	versionFlag := fs.String("version", "", "with --listing: the version to download (default: the newest published)")
 	positional, err := parse(fs, args)
 	if err != nil {
 		return err
 	}
+	if *listing != "" {
+		if *storeID != "" || *themeID != "" || *storefrontID != "" {
+			return errors.New("use either --listing or --store, not both")
+		}
+		return a.pullListingVersion(ctx, *listing, *versionFlag, positional)
+	}
+	if *versionFlag != "" {
+		return errors.New("--version needs --listing")
+	}
 	if *storeID == "" {
-		return errors.New("--store is required. Find the ID with `tringify store list`")
+		return errors.New("--store or --listing is required. Find a store ID with `tringify store list` and listing IDs with `tringify theme listings`")
 	}
 	target, err := a.storeTarget(ctx, *storeID, *storefrontID)
 	if err != nil {

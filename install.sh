@@ -17,7 +17,7 @@ fail() { echo "tringify install: $*" >&2; exit 1; }
 case "$(uname -s)" in
   Darwin) os=darwin ;;
   Linux) os=linux ;;
-  *) fail "unsupported operating system $(uname -s); on Windows download the ZIP from https://github.com/$repo/releases" ;;
+  *) fail "unsupported operating system $(uname -s); on Windows use install.ps1 (see https://github.com/$repo#install)" ;;
 esac
 case "$(uname -m)" in
   x86_64|amd64) arch=amd64 ;;

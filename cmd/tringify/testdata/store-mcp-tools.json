@@ -1,264 +1,296 @@
 [
- {
-  "inputSchema": {
-   "additionalProperties": false,
-   "type": "object"
-  },
-  "name": "get_connection_context"
- },
- {
-  "inputSchema": {
-   "additionalProperties": false,
-   "properties": {
-    "storefront_id": {
-     "type": "string"
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "type": "object"
+        },
+        "name": "get_connection_context"
     },
-    "theme_id": {
-     "type": "string"
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "properties": {
+                "storefront_id": {
+                    "type": "string"
+                },
+                "theme_id": {
+                    "type": "string"
+                },
+                "upload_id": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "storefront_id",
+                "theme_id",
+                "upload_id"
+            ],
+            "type": "object"
+        },
+        "name": "sync_theme"
     },
-    "upload_id": {
-     "type": "string"
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "properties": {
+                "image_names": {
+                    "description": "Every file in the theme's demo/images folder.",
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array"
+                },
+                "images": {
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "description": "Demo image file name → store file ID, for the images plan_sample_content listed.",
+                    "type": "object"
+                },
+                "pack": {
+                    "description": "The theme's demo/catalog.json.",
+                    "type": "object"
+                }
+            },
+            "required": [
+                "pack",
+                "image_names",
+                "images"
+            ],
+            "type": "object"
+        },
+        "name": "add_sample_content"
+    },
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "properties": {
+                "image_names": {
+                    "description": "Every file in the theme's demo/images folder.",
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array"
+                },
+                "pack": {
+                    "description": "The theme's demo/catalog.json.",
+                    "type": "object"
+                }
+            },
+            "required": [
+                "pack",
+                "image_names"
+            ],
+            "type": "object"
+        },
+        "name": "plan_sample_content"
+    },
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "properties": {
+                "items": {
+                    "description": "Files to reserve. Each item requires `original_filename`, `mime_type`, and exact `size_bytes`; `alt_text` is optional.",
+                    "items": {
+                        "type": "object"
+                    },
+                    "type": "array"
+                },
+                "library": {
+                    "description": "Select Media or Site Assets. Access is checked for this library only.",
+                    "enum": [
+                        "media",
+                        "site_assets"
+                    ],
+                    "type": "string"
+                }
+            },
+            "required": [
+                "items",
+                "library"
+            ],
+            "type": "object"
+        },
+        "name": "create_file_uploads"
+    },
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "properties": {
+                "intent_ids": {
+                    "description": "Intent ids returned by the create call.",
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array"
+                },
+                "library": {
+                    "description": "Select Media or Site Assets. Access is checked for this library only.",
+                    "enum": [
+                        "media",
+                        "site_assets"
+                    ],
+                    "type": "string"
+                }
+            },
+            "required": [
+                "intent_ids",
+                "library"
+            ],
+            "type": "object"
+        },
+        "name": "finalize_file_uploads"
+    },
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "properties": {
+                "intent_ids": {
+                    "description": "Intent ids to inspect.",
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array"
+                },
+                "library": {
+                    "description": "Select Media or Site Assets. Access is checked for this library only.",
+                    "enum": [
+                        "media",
+                        "site_assets"
+                    ],
+                    "type": "string"
+                }
+            },
+            "required": [
+                "intent_ids",
+                "library"
+            ],
+            "type": "object"
+        },
+        "name": "get_file_upload_status"
+    },
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "properties": {
+                "original_filename": {
+                    "maxLength": 255,
+                    "type": "string"
+                },
+                "size_bytes": {
+                    "minimum": 1,
+                    "type": "integer"
+                },
+                "storefront_id": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "storefront_id",
+                "original_filename",
+                "size_bytes"
+            ],
+            "type": "object"
+        },
+        "name": "create_theme_import_upload"
+    },
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "properties": {
+                "storefront_id": {
+                    "type": "string"
+                },
+                "theme_id": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "storefront_id",
+                "theme_id"
+            ],
+            "type": "object"
+        },
+        "name": "export_theme"
+    },
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "properties": {
+                "intent_id": {
+                    "type": "string"
+                },
+                "storefront_id": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "storefront_id",
+                "intent_id"
+            ],
+            "type": "object"
+        },
+        "name": "finalize_theme_import_upload"
+    },
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "properties": {
+                "intent_id": {
+                    "type": "string"
+                },
+                "storefront_id": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "storefront_id",
+                "intent_id"
+            ],
+            "type": "object"
+        },
+        "name": "get_theme_import_upload_status"
+    },
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "properties": {
+                "storefront_id": {
+                    "type": "string"
+                },
+                "upload_id": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "storefront_id",
+                "upload_id"
+            ],
+            "type": "object"
+        },
+        "name": "import_theme"
+    },
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "properties": {
+                "storefront_id": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "storefront_id"
+            ],
+            "type": "object"
+        },
+        "name": "list_storefront_themes"
+    },
+    {
+        "inputSchema": {
+            "additionalProperties": false,
+            "properties": {},
+            "type": "object"
+        },
+        "name": "list_storefronts"
     }
-   },
-   "required": [
-    "storefront_id",
-    "theme_id",
-    "upload_id"
-   ],
-   "type": "object"
-  },
-  "name": "sync_theme"
- },
- {
-  "inputSchema": {
-   "additionalProperties": false,
-   "properties": {
-    "images": {
-     "additionalProperties": {
-      "type": "string"
-     },
-     "description": "Demo image file name \u2192 store file ID.",
-     "type": "object"
-    },
-    "pack": {
-     "description": "The theme's demo/catalog.json.",
-     "type": "object"
-    }
-   },
-   "required": [
-    "pack",
-    "images"
-   ],
-   "type": "object"
-  },
-  "name": "add_sample_content"
- },
- {
-  "inputSchema": {
-   "additionalProperties": false,
-   "properties": {
-    "items": {
-     "description": "Files to reserve. Each item requires `original_filename`, `mime_type`, and exact `size_bytes`; `alt_text` is optional.",
-     "items": {
-      "type": "object"
-     },
-     "type": "array"
-    },
-    "library": {
-     "description": "Select Media or Site Assets. Access is checked for this library only.",
-     "enum": [
-      "media",
-      "site_assets"
-     ],
-     "type": "string"
-    }
-   },
-   "required": [
-    "items",
-    "library"
-   ],
-   "type": "object"
-  },
-  "name": "create_file_uploads"
- },
- {
-  "inputSchema": {
-   "additionalProperties": false,
-   "properties": {
-    "intent_ids": {
-     "description": "Intent ids returned by the create call.",
-     "items": {
-      "type": "string"
-     },
-     "type": "array"
-    },
-    "library": {
-     "description": "Select Media or Site Assets. Access is checked for this library only.",
-     "enum": [
-      "media",
-      "site_assets"
-     ],
-     "type": "string"
-    }
-   },
-   "required": [
-    "intent_ids",
-    "library"
-   ],
-   "type": "object"
-  },
-  "name": "finalize_file_uploads"
- },
- {
-  "inputSchema": {
-   "additionalProperties": false,
-   "properties": {
-    "intent_ids": {
-     "description": "Intent ids to inspect.",
-     "items": {
-      "type": "string"
-     },
-     "type": "array"
-    },
-    "library": {
-     "description": "Select Media or Site Assets. Access is checked for this library only.",
-     "enum": [
-      "media",
-      "site_assets"
-     ],
-     "type": "string"
-    }
-   },
-   "required": [
-    "intent_ids",
-    "library"
-   ],
-   "type": "object"
-  },
-  "name": "get_file_upload_status"
- },
- {
-  "inputSchema": {
-   "additionalProperties": false,
-   "properties": {
-    "original_filename": {
-     "maxLength": 255,
-     "type": "string"
-    },
-    "size_bytes": {
-     "minimum": 1,
-     "type": "integer"
-    },
-    "storefront_id": {
-     "type": "string"
-    }
-   },
-   "required": [
-    "storefront_id",
-    "original_filename",
-    "size_bytes"
-   ],
-   "type": "object"
-  },
-  "name": "create_theme_import_upload"
- },
- {
-  "inputSchema": {
-   "additionalProperties": false,
-   "properties": {
-    "storefront_id": {
-     "type": "string"
-    },
-    "theme_id": {
-     "type": "string"
-    }
-   },
-   "required": [
-    "storefront_id",
-    "theme_id"
-   ],
-   "type": "object"
-  },
-  "name": "export_theme"
- },
- {
-  "inputSchema": {
-   "additionalProperties": false,
-   "properties": {
-    "intent_id": {
-     "type": "string"
-    },
-    "storefront_id": {
-     "type": "string"
-    }
-   },
-   "required": [
-    "storefront_id",
-    "intent_id"
-   ],
-   "type": "object"
-  },
-  "name": "finalize_theme_import_upload"
- },
- {
-  "inputSchema": {
-   "additionalProperties": false,
-   "properties": {
-    "intent_id": {
-     "type": "string"
-    },
-    "storefront_id": {
-     "type": "string"
-    }
-   },
-   "required": [
-    "storefront_id",
-    "intent_id"
-   ],
-   "type": "object"
-  },
-  "name": "get_theme_import_upload_status"
- },
- {
-  "inputSchema": {
-   "additionalProperties": false,
-   "properties": {
-    "storefront_id": {
-     "type": "string"
-    },
-    "upload_id": {
-     "type": "string"
-    }
-   },
-   "required": [
-    "storefront_id",
-    "upload_id"
-   ],
-   "type": "object"
-  },
-  "name": "import_theme"
- },
- {
-  "inputSchema": {
-   "additionalProperties": false,
-   "properties": {
-    "storefront_id": {
-     "type": "string"
-    }
-   },
-   "required": [
-    "storefront_id"
-   ],
-   "type": "object"
-  },
-  "name": "list_storefront_themes"
- },
- {
-  "inputSchema": {
-   "additionalProperties": false,
-   "properties": {},
-   "type": "object"
-  },
-  "name": "list_storefronts"
- }
 ]

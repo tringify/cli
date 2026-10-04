@@ -40,7 +40,8 @@ Themes:
   theme contract        Print the theme author contract as JSON
   theme push            Add the theme to a store as a new, unpublished theme
   theme dev             Sync your edits into an unpublished theme on a store
-  theme pull            Download a store theme into a new directory
+  theme pull            Download a store theme or a published version into a new directory
+  theme diff            Compare the theme with a published version of your listing
   theme listings        List your organization's theme listings
   theme publish         Publish the theme as a new version of a listing
 
@@ -78,6 +79,7 @@ func friendly(err error) string {
 }
 
 type app struct {
+	stdin          io.Reader
 	stdout, stderr io.Writer
 	apiBase        string
 	devAPIBase     string
@@ -85,7 +87,7 @@ type app struct {
 }
 
 func newApp(stdout, stderr io.Writer) *app {
-	a := &app{stdout: stdout, stderr: stderr, apiBase: "https://api.tringify.com", devAPIBase: "https://api-dev.tringify.com"}
+	a := &app{stdin: os.Stdin, stdout: stdout, stderr: stderr, apiBase: "https://api.tringify.com", devAPIBase: "https://api-dev.tringify.com"}
 	if v := os.Getenv("TRINGIFY_API_BASE"); v != "" {
 		a.apiBase = strings.TrimRight(v, "/")
 	}
@@ -150,6 +152,8 @@ func (a *app) theme(ctx context.Context, args []string) error {
 		return a.themeDev(ctx, args[1:])
 	case "pull":
 		return a.themePull(ctx, args[1:])
+	case "diff":
+		return a.themeDiff(ctx, args[1:])
 	case "listings":
 		return a.themeListings(ctx, args[1:])
 	case "publish":

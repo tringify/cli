@@ -38,11 +38,34 @@ func (a *app) addSampleContent(ctx context.Context, t *storeTarget, root string)
 	if err != nil {
 		return err
 	}
-	a.printf("Uploading %d demo images to %s…\n", len(names), t.session.Account.Target.Name)
+	// The store says which products and collections it lacks and the images
+	// they use; only those are uploaded, so running this again uploads nothing
+	// new.
+	data, err := t.client.Call(ctx, "plan_sample_content", map[string]any{"pack": pack, "image_names": names})
+	if err != nil {
+		return err
+	}
+	var plan struct {
+		NewProducts      int      `json:"new_products"`
+		ExistingProducts int      `json:"existing_products"`
+		NewCollections   int      `json:"new_collections"`
+		Images           []string `json:"images"`
+	}
+	if err := decode(data, &plan); err != nil {
+		return err
+	}
+	if plan.NewProducts == 0 && plan.NewCollections == 0 {
+		a.printf("%s already has the sample products and collections.\n", t.session.Account.Target.Name)
+		return nil
+	}
+	needed := plan.Images
+	if len(needed) > 0 {
+		a.printf("Uploading %d demo images to %s…\n", len(needed), t.session.Account.Target.Name)
+	}
 	fileIDs := map[string]string{}
-	for start := 0; start < len(names); start += sampleUploadBatch {
-		end := min(start+sampleUploadBatch, len(names))
-		ids, err := a.uploadStoreImages(ctx, t, root, names[start:end])
+	for start := 0; start < len(needed); start += sampleUploadBatch {
+		end := min(start+sampleUploadBatch, len(needed))
+		ids, err := a.uploadStoreImages(ctx, t, root, needed[start:end])
 		if err != nil {
 			return err
 		}
@@ -50,10 +73,10 @@ func (a *app) addSampleContent(ctx context.Context, t *storeTarget, root string)
 			fileIDs[name] = id
 		}
 	}
-	if _, err := t.client.Call(ctx, "add_sample_content", map[string]any{"pack": pack, "images": fileIDs}); err != nil {
+	if _, err := t.client.Call(ctx, "add_sample_content", map[string]any{"pack": pack, "image_names": names, "images": fileIDs}); err != nil {
 		return err
 	}
-	a.println("Adding the sample products and collections. They appear under Products in a minute.")
+	a.printf("Adding %d sample products and %d collections. They appear under Products in a minute.\n", plan.NewProducts, plan.NewCollections)
 	return nil
 }
 

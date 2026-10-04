@@ -376,12 +376,13 @@ func (a *app) themeListings(ctx context.Context, args []string) error {
 }
 
 func (a *app) themePublish(ctx context.Context, args []string) error {
-	fs := newFlags("theme publish --listing ID --version X.Y.Z [DIR]", "Package the theme from a clean git checkout and publish it as a new version of an existing listing. The version records the source commit.")
+	fs := newFlags("theme publish --listing ID --version X.Y.Z [--yes] [DIR]", "Package the theme from a clean git checkout and publish it as a new version of an existing listing. It first shows the files that change compared with the newest published version and asks before publishing. The version records the source commit.")
 	listing := fs.String("listing", "", "theme listing ID (see `tringify theme listings`)")
 	versionFlag := fs.String("version", "", "version to publish, for example 1.2.0")
 	notes := fs.String("notes", "", "release notes")
 	breaking := fs.Bool("breaking", false, "mark the version as containing breaking changes")
 	installStore := fs.String("install-store", "", "also install the published version into this organization development store")
+	yes := fs.Bool("yes", false, "publish without showing the changes and asking first (needed when not in a terminal)")
 	positional, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -406,6 +407,28 @@ func (a *app) themePublish(ctx context.Context, args []string) error {
 	api, session, err := a.devAPI()
 	if err != nil {
 		return err
+	}
+	if !*yes {
+		latest, ok, err := resolveVersion(ctx, api, *listing, "")
+		if err != nil {
+			return err
+		}
+		if ok {
+			changes, err := a.compareWithVersion(ctx, api, *listing, latest, root)
+			if err != nil {
+				return err
+			}
+			a.printChanges(changes, latest.Version)
+		} else {
+			a.println("This will be the listing's first published version.")
+		}
+		approved, err := confirm(a.stdin, a.stdout, fmt.Sprintf("Publish version %s?", *versionFlag))
+		if err != nil {
+			return err
+		}
+		if !approved {
+			return errors.New("not published")
+		}
 	}
 	bundle, name, cleanup, err := a.packageTemp(ctx, root)
 	if err != nil {
