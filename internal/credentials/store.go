@@ -123,10 +123,6 @@ func (s *Store) Save(a Account) error {
 		return err
 	}
 	if err := s.backend.set(key, string(secret)); err != nil {
-		if _, isKeyring := s.backend.(keyringBackend); isKeyring {
-			// Never fall back to a plain file on our own; say how to choose it.
-			return fmt.Errorf("could not save the login in %s (%v). To keep it in a file instead, run the command again with TRINGIFY_CREDENTIALS_STORE=file (it is stored in %s)", s.backend.name(), err, filepath.Join(s.dir, "credentials.json"))
-		}
 		return fmt.Errorf("save credentials in %s: %w", s.backend.name(), err)
 	}
 	index, err := s.readIndex()
