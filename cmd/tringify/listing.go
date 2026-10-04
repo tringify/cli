@@ -30,6 +30,15 @@ type listingVersion struct {
 // empty name the newest published version. ok is false when the listing has
 // no published version yet.
 func resolveVersion(ctx context.Context, api *devapi.Client, listing, name string) (listingVersion, bool, error) {
+	// The listing itself first, so another organization's listing or a typo
+	// is reported as such rather than as a listing with no versions.
+	if err := api.Do(ctx, http.MethodGet, "/org/themes/"+url.PathEscape(listing), nil, nil); err != nil {
+		var apiErr *devapi.Error
+		if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+			return listingVersion{}, false, fmt.Errorf("listing %s is not one of your organization's theme listings. See `tringify theme listings`", listing)
+		}
+		return listingVersion{}, false, err
+	}
 	var versions []listingVersion
 	if err := api.Do(ctx, http.MethodGet, "/org/themes/"+url.PathEscape(listing)+"/versions", nil, &versions); err != nil {
 		return listingVersion{}, false, err

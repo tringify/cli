@@ -25,6 +25,11 @@ func versionsServer(t *testing.T) *httptest.Server {
 			return
 		}
 		switch r.URL.Path {
+		case "/api/v1/org/themes/L":
+			w.Write([]byte(`{"success":true,"data":{"id":"L","name":"Aurora"}}`))
+		case "/api/v1/org/themes/other":
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"code":"NOT_FOUND","message":"Listing not found"}`))
 		case "/api/v1/org/themes/L/versions":
 			w.Write([]byte(`{"success":true,"data":[{"id":"v3","version":"1.3.0","status":"draft"},{"id":"v2","version":"1.2.0","status":"published"},{"id":"v1","version":"1.1.0","status":"published"}]}`))
 		case "/api/v1/org/themes/L/versions/v2/package":
@@ -55,6 +60,9 @@ func TestResolveAndDownloadListingVersions(t *testing.T) {
 	}
 	if _, _, err = resolveVersion(ctx, api, "L", "9.9.9"); err == nil || !strings.Contains(err.Error(), "no version 9.9.9") {
 		t.Fatalf("unknown version: %v", err)
+	}
+	if _, _, err = resolveVersion(ctx, api, "other", ""); err == nil || !strings.Contains(err.Error(), "is not one of your") {
+		t.Fatalf("foreign listing: %v", err)
 	}
 	raw, name, err := downloadVersion(ctx, api, "L", listingVersion{ID: "v2", Version: "1.2.0"})
 	if err != nil || string(raw) != "PK-zip" || name != "aurora-1.2.0.zip" {
