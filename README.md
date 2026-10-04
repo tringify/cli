@@ -1,6 +1,6 @@
 # Tringify CLI
 
-The `tringify` command builds and ships Tringify storefront themes from your terminal: create a theme from the starter, preview it with sample content, add it to a development store, and publish versions to your theme listing.
+The `tringify` command builds and ships Tringify themes and apps from your terminal. For themes: create one from the starter, preview it with sample content, add it to a development store, and publish versions to your theme listing. For apps: start a project from the app starter, keep the app's configuration in `tringify.app.json`, and release versions.
 
 ## Install
 
@@ -66,6 +66,22 @@ tringify theme publish --listing LISTING_ID --version 1.0.0 --notes "First relea
 
 Create the listing itself (name, category, pricing, support details) in the [Developer Portal](https://dev.tringify.com) under **Themes**.
 
+### Apps
+
+Create the app in the [Developer Portal](https://dev.tringify.com) under **Apps**, then:
+
+```sh
+tringify app list                       # find the app's ID
+tringify app init --app APP_ID          # project from the app starter, with tringify.app.json
+# edit tringify.app.json: scopes, webhook URL, admin URL, events
+tringify app config push                # shows what changes, then replaces the draft
+tringify app webhook test               # sends a signed app.test webhook
+tringify app release --bump minor --notes "First release"
+tringify app publish 1.0.0              # once the version is approved
+```
+
+`tringify.app.json` holds everything a release carries except the listing (name, descriptions, screenshots, pricing), which stays in the Developer Portal. Pushing replaces the whole draft: a field you delete from the file is cleared. Stores only see a change once you release a version and publish it.
+
 ## Commands
 
 | Command | What it does |
@@ -90,6 +106,15 @@ Create the listing itself (name, category, pricing, support details) in the [Dev
 | `store create --name NAME --country CC --currency CUR` | Creates a development store and waits until it is ready. `--subdomain`, `--timezone` and `--billing-currency` are optional. |
 | `theme listings` | Lists your organization's theme listings and their IDs. |
 | `theme publish --listing ID --version X.Y.Z [--notes TEXT] [--breaking] [--install-store ID] [--yes] [DIR]` | Packages the theme, shows what changes compared with the newest published version, and publishes it as a new version of the listing once you confirm. Pass `--yes` to skip the question, for example in CI. |
+| `app list` | Lists your organization's apps and their IDs. |
+| `app init --app ID [DIR]` | Creates a project from [app-starter](https://github.com/tringify/app-starter) in a new directory (default: the app's slug), writes the app's configuration to `tringify.app.json` and creates `.dev.vars` for local development. |
+| `app config pull [--app ID] [--file PATH] [--yes]` | Writes the app's draft configuration to `tringify.app.json`. If the file exists and differs, shows the differences and asks first. |
+| `app config push [--file PATH] [--yes]` | Shows the fields that differ from the draft and, once you confirm, replaces the draft with the file. Unknown fields are refused. The saved values are written back to the file when the platform normalizes them, for example sorting scopes. |
+| `app release --bump patch\|minor\|major [--notes TEXT]` | Submits the draft as a new version. Refuses while `tringify.app.json` differs from the draft. |
+| `app versions` | Lists the app's versions and their review status. |
+| `app publish VERSION` | Publishes an approved version so stores can install it or update to it. |
+| `app webhook test` | Sends a signed `app.test` webhook to the app's webhook URL and reports what your endpoint answered. |
+| `app deliveries [--status STATUS] [--limit N]` | Lists recent webhook deliveries with their status, attempts and your endpoint's last answer. |
 | `version` | Prints the CLI version. |
 
 Edit sections in `src/sections/<name>/` as `body.html`, `style.css` and `schema.json`, with shared styles in `src/_shared.css`, or write `sections/*.vasc` files directly. Keep `src/.generated-sections.json` in version control: it records which section files the build generated, so removing a section's source also removes its compiled file safely, and a compiled file you edited by hand is never deleted.
@@ -104,10 +129,10 @@ If you used the `tringify-theme` command from the theme tools, every one of its 
 
 | Login | Access requested |
 | --- | --- |
-| Developer organization | View and edit your organization's themes, and list and create its development stores (`organization:themes:read`, `organization:themes:write`, `organization:dev_stores:read`, `organization:dev_stores:write`) |
+| Developer organization | View and edit your organization's themes and apps, and list and create its development stores (`organization:themes:read`, `organization:themes:write`, `organization:apps:read`, `organization:apps:write`, `organization:dev_stores:read`, `organization:dev_stores:write`) |
 | Store | View and edit the store's storefront themes (`store:online_store.storefronts:read`, `store:online_store.storefronts:write`). With `theme dev --with-demo`, also add products and files (`store:products:write`, `store:files:write`). |
 
-The CLI never receives more access than your own role in that organization or store, and if your role changes, the CLI's access changes with it. It cannot change your live theme, delete stores, create listings, or change pricing. If you signed in before development store access was added, run `tringify login` again to use `store` commands.
+The CLI never receives more access than your own role in that organization or store, and if your role changes, the CLI's access changes with it. It cannot change your live theme, delete stores or apps, create listings, change pricing, or read or regenerate an app's client secret. If you signed in before app or development store access was added, run `tringify login` again to use `app` or `store` commands.
 
 Sign-in uses OAuth with PKCE and a one-time listener on `127.0.0.1`, so your password never passes through the CLI. Access tokens last 15 minutes and are refreshed automatically; refresh tokens rotate on every use. Tokens are kept only in your system keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux (GNOME Keyring, KWallet). Without one, sign-in stops and says so.
 

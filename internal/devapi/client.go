@@ -33,16 +33,22 @@ type Error struct {
 	Status  int
 	Code    string
 	Message string
+	// Detail is the API's explanation of a validation failure, when it gives one.
+	Detail string
 }
 
 func (e *Error) Error() string {
 	if e.Message == "" {
 		return fmt.Sprintf("request failed (HTTP %d)", e.Status)
 	}
-	if e.Code != "" {
-		return e.Message + " (" + e.Code + ")"
+	message := e.Message
+	if e.Detail != "" && e.Detail != e.Message {
+		message += " " + e.Detail
 	}
-	return e.Message
+	if e.Code != "" {
+		return message + " (" + e.Code + ")"
+	}
+	return message
 }
 
 // Do sends a request and decodes the "data" field of a successful reply.
@@ -150,15 +156,23 @@ func apiError(status int, raw []byte) *Error {
 	var envelope struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
+		Details any    `json:"details"`
 		Error   *struct {
 			Code    string `json:"code"`
 			Message string `json:"message"`
+			Details any    `json:"details"`
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(raw, &envelope)
 	e := &Error{Status: status, Code: envelope.Code, Message: envelope.Message}
+	details := envelope.Details
 	if envelope.Error != nil {
-		e.Code, e.Message = envelope.Error.Code, envelope.Error.Message
+		e.Code, e.Message, details = envelope.Error.Code, envelope.Error.Message, envelope.Error.Details
+	}
+	// Only a text explanation is shown; structured details stay out of the
+	// one-line error.
+	if text, ok := details.(string); ok {
+		e.Detail = text
 	}
 	return e
 }

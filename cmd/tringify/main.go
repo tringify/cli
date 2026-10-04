@@ -45,6 +45,17 @@ Themes:
   theme listings        List your organization's theme listings
   theme publish         Publish the theme as a new version of a listing
 
+Apps:
+  app list              List your organization's apps
+  app init              Create a project for an app from the app starter
+  app config pull       Write the app's configuration to tringify.app.json
+  app config push       Replace the app's draft configuration with tringify.app.json
+  app release           Submit the draft as a new version
+  app versions          List the app's versions
+  app publish VERSION   Publish an approved version
+  app webhook test      Send a test webhook to the app's webhook URL
+  app deliveries        List recent webhook deliveries
+
 Development stores:
   store list            List your organization's development stores
   store create          Create a development store
@@ -116,6 +127,8 @@ func (a *app) run(ctx context.Context, args []string) error {
 		return a.theme(ctx, args[1:])
 	case "store":
 		return a.store(ctx, args[1:])
+	case "app":
+		return a.appCommand(ctx, args[1:])
 	case "version", "--version", "-v":
 		a.println("tringify " + version)
 		return nil
