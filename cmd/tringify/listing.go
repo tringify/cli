@@ -193,7 +193,11 @@ func confirm(in io.Reader, out io.Writer, question string) (bool, error) {
 		}
 	}
 	fmt.Fprintf(out, "%s [y/N] ", question)
-	answer, _ := bufio.NewReader(in).ReadString('\n')
+	answer, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && answer == "" {
+		fmt.Fprintln(out)
+		return false, errors.New("no answer was given. Pass --yes to publish without confirming")
+	}
 	answer = strings.ToLower(strings.TrimSpace(answer))
 	return answer == "y" || answer == "yes", nil
 }
