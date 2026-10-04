@@ -183,20 +183,25 @@ func (a *app) printChanges(changes []theme.Change, version string) {
 	a.printf("Compared with version %s: %d added, %d changed, %d removed.\n", version, counts["added"], counts["changed"], counts["removed"])
 }
 
-// confirm asks a yes/no question on a terminal. Without a terminal it
-// refuses, so scripts must pass --yes.
+// confirm asks a yes/no question about publishing.
 func confirm(in io.Reader, out io.Writer, question string) (bool, error) {
+	return confirmWith(in, out, question, "Pass --yes to publish without confirming")
+}
+
+// confirmWith asks a yes/no question on a terminal. Without a terminal it
+// refuses with hint, so scripts must pass --yes.
+func confirmWith(in io.Reader, out io.Writer, question, hint string) (bool, error) {
 	if f, ok := in.(*os.File); ok {
 		info, err := f.Stat()
 		if err != nil || info.Mode()&os.ModeCharDevice == 0 {
-			return false, errors.New("not running in a terminal. Pass --yes to publish without confirming")
+			return false, errors.New("not running in a terminal. " + hint)
 		}
 	}
 	fmt.Fprintf(out, "%s [y/N] ", question)
 	answer, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil && answer == "" {
 		fmt.Fprintln(out)
-		return false, errors.New("no answer was given. Pass --yes to publish without confirming")
+		return false, errors.New("no answer was given. " + hint)
 	}
 	answer = strings.ToLower(strings.TrimSpace(answer))
 	return answer == "y" || answer == "yes", nil
