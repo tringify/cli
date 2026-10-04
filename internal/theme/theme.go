@@ -26,12 +26,18 @@ var StarterArchive = "https://codeload.github.com/tringify/theme-starter/tar.gz/
 // DownloadStarter fetches and unpacks the starter theme into a new temporary
 // directory and returns the theme root inside it.
 func DownloadStarter(ctx context.Context, client *http.Client) (string, func(), error) {
-	work, err := os.MkdirTemp("", "tringify-theme-starter-")
+	return DownloadArchive(ctx, client, StarterArchive, "the starter theme")
+}
+
+// DownloadArchive fetches and unpacks a GitHub source archive into a new
+// temporary directory and returns its root directory. what names it in errors.
+func DownloadArchive(ctx context.Context, client *http.Client, archiveURL, what string) (string, func(), error) {
+	work, err := os.MkdirTemp("", "tringify-starter-")
 	if err != nil {
 		return "", nil, err
 	}
 	cleanup := func() { os.RemoveAll(work) }
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, StarterArchive, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
 	if err != nil {
 		cleanup()
 		return "", nil, err
@@ -44,7 +50,7 @@ func DownloadStarter(ctx context.Context, client *http.Client) (string, func(), 
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		cleanup()
-		return "", nil, fmt.Errorf("download the starter theme: HTTP %d", resp.StatusCode)
+		return "", nil, fmt.Errorf("download %s: HTTP %d", what, resp.StatusCode)
 	}
 	root, err := untar(resp.Body, work)
 	if err != nil {

@@ -24,6 +24,8 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "list":
 		return a.appList(ctx, args[1:])
+	case "init":
+		return a.appInit(ctx, args[1:])
 	case "config":
 		if len(args) > 1 {
 			switch args[1] {
@@ -372,7 +374,7 @@ func (a *app) appPublish(ctx context.Context, args []string) error {
 }
 
 func (a *app) appWebhookTest(ctx context.Context, args []string) error {
-	fs := newFlags("app webhook test", "Send a signed app/test webhook to the app's webhook URL and report the answer.")
+	fs := newFlags("app webhook test", "Send a signed app.test webhook to the app's webhook URL and report the answer.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	if _, err := parse(fs, args); err != nil {
