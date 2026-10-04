@@ -17,7 +17,7 @@ import (
 )
 
 func (a *app) appCommand(ctx context.Context, args []string) error {
-	if len(args) == 0 {
+	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprint(a.stdout, usage)
 		return nil
 	}
@@ -91,11 +91,22 @@ func (a *app) appList(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	// The API returns at most 50 apps a page.
 	var data struct {
 		Apps []map[string]any `json:"apps"`
 	}
-	if err := api.Do(ctx, http.MethodGet, "/apps?limit=100", nil, &data); err != nil {
-		return appAccess(err)
+	for page := 1; ; page++ {
+		var batch struct {
+			Apps       []map[string]any `json:"apps"`
+			TotalCount int              `json:"total_count"`
+		}
+		if err := api.Do(ctx, http.MethodGet, "/apps?limit=50&page="+strconv.Itoa(page), nil, &batch); err != nil {
+			return appAccess(err)
+		}
+		data.Apps = append(data.Apps, batch.Apps...)
+		if len(batch.Apps) == 0 || len(data.Apps) >= batch.TotalCount {
+			break
+		}
 	}
 	if len(data.Apps) == 0 {
 		a.printf("No apps in %s. Create one in the Developer Portal under Apps.\n", session.Account.Target.Name)

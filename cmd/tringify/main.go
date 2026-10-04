@@ -140,7 +140,7 @@ func (a *app) run(ctx context.Context, args []string) error {
 }
 
 func (a *app) theme(ctx context.Context, args []string) error {
-	if len(args) == 0 {
+	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprint(a.stdout, usage)
 		return nil
 	}
