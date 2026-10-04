@@ -47,16 +47,13 @@ func (a *app) storeList(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	var data any
+	var data struct {
+		Stores []any `json:"stores"`
+	}
 	if err := api.Do(ctx, http.MethodGet, "/stores?limit=100", nil, &data); err != nil {
 		return devStoreAccess(err)
 	}
-	list := items(data)
-	if m, ok := data.(map[string]any); ok && len(list) == 0 {
-		if l, ok := m["stores"].([]any); ok {
-			list = items(l)
-		}
-	}
+	list := listAt(data.Stores, "")
 	if len(list) == 0 {
 		a.printf("No development stores in %s. Create one with `tringify store create --name NAME`.\n", session.Account.Target.Name)
 		return nil
@@ -145,7 +142,7 @@ func (a *app) storeCreate(ctx context.Context, args []string) error {
 		if err := api.Do(ctx, http.MethodGet, "/stores/"+url.PathEscape(id)+"/setup/status", nil, &status); err != nil {
 			return err
 		}
-		switch firstNonEmpty(str(status["setup_status"]), str(status["status"])) {
+		switch str(status["setup_status"]) {
 		case "completed":
 			a.printf("Ready: %s (store %s, %s.mytringify.com).\n", strings.TrimSpace(*name), id, *subdomain)
 			a.printf("\nNext:\n  tringify login --store\n  tringify theme dev --store %s\n", id)

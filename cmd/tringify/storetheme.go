@@ -57,7 +57,7 @@ func (a *app) storeTarget(ctx context.Context, storeID, storefrontID string, ext
 		if err != nil {
 			return nil, err
 		}
-		list := items(data)
+		list := listAt(data, "storefronts")
 		for _, sf := range list {
 			if sf["is_primary"] == true {
 				storefrontID = str(sf["id"])
@@ -127,18 +127,10 @@ func (a *app) importTheme(ctx context.Context, t *storeTarget, root string) (str
 	return themeID, name, nil
 }
 
+// themeIDFrom reads the theme_id an import returns.
 func themeIDFrom(data any) string {
-	m, ok := data.(map[string]any)
-	if !ok {
-		return ""
-	}
-	if id := firstNonEmpty(str(m["theme_id"]), str(m["id"])); id != "" {
-		return id
-	}
-	if t, ok := m["theme"].(map[string]any); ok {
-		return str(t["id"])
-	}
-	return ""
+	m, _ := data.(map[string]any)
+	return str(m["theme_id"])
 }
 
 // storeTheme finds one of the storefront's themes.
@@ -147,7 +139,7 @@ func (a *app) storeTheme(ctx context.Context, t *storeTarget, themeID string) (m
 	if err != nil {
 		return nil, err
 	}
-	for _, th := range items(data) {
+	for _, th := range listAt(data, "themes") {
 		if str(th["id"]) == themeID {
 			return th, nil
 		}
@@ -177,7 +169,7 @@ func (a *app) themePull(ctx context.Context, args []string) error {
 			return err
 		}
 		a.println("Pass --theme with one of these:")
-		for _, th := range items(data) {
+		for _, th := range listAt(data, "themes") {
 			state := "unpublished"
 			if th["is_active"] == true {
 				state = "published"
