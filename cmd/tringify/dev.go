@@ -175,7 +175,7 @@ func (a *app) syncTheme(ctx context.Context, t *storeTarget, root, themeID strin
 		return err
 	}
 	defer cleanup()
-	uploadID, err := a.uploadBundle(ctx, t, bundle)
+	uploadID, err := a.uploadBundle(ctx, t, bundle, nil)
 	if err != nil {
 		return err
 	}

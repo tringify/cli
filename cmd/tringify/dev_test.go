@@ -60,3 +60,11 @@ func TestDemoImageNamesListsOnlyFiles(t *testing.T) {
 		t.Fatalf("names = %v, %v", names, err)
 	}
 }
+
+func TestSizeLabel(t *testing.T) {
+	for n, want := range map[int64]string{512: "512 bytes", 2048: "2 KB", 1468006: "1.4 MB"} {
+		if got := sizeLabel(n); got != want {
+			t.Errorf("sizeLabel(%d) = %q, want %q", n, got, want)
+		}
+	}
+}

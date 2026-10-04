@@ -74,8 +74,12 @@ func (a *app) storeTarget(ctx context.Context, storeID, storefrontID string, ext
 }
 
 // uploadBundle uploads a packaged theme for the storefront and waits until it
-// is validated. It returns the upload to import or sync.
-func (a *app) uploadBundle(ctx context.Context, t *storeTarget, bundle string) (string, error) {
+// is validated. It returns the upload to import or sync. step, when set,
+// reports each stage.
+func (a *app) uploadBundle(ctx context.Context, t *storeTarget, bundle string, step func(string)) (string, error) {
+	if step == nil {
+		step = func(string) {}
+	}
 	info, err := os.Stat(bundle)
 	if err != nil {
 		return "", err
@@ -88,9 +92,11 @@ func (a *app) uploadBundle(ctx context.Context, t *storeTarget, bundle string) (
 	if err := decode(data, &grant); err != nil {
 		return "", err
 	}
+	step(fmt.Sprintf("Uploading %s…", sizeLabel(info.Size())))
 	if err := upload.Put(ctx, &http.Client{Timeout: 10 * time.Minute}, grant, bundle); err != nil {
 		return "", err
 	}
+	step("Checking the theme…")
 	if _, err := t.client.Call(ctx, "finalize_theme_import_upload", map[string]any{"storefront_id": t.storefrontID, "intent_id": grant.IntentID}); err != nil {
 		return "", err
 	}
@@ -106,16 +112,17 @@ func (a *app) uploadBundle(ctx context.Context, t *storeTarget, bundle string) (
 
 // importTheme packages the theme and adds it as a new unpublished theme.
 func (a *app) importTheme(ctx context.Context, t *storeTarget, root string) (string, string, error) {
+	a.println("Packaging the theme…")
 	bundle, name, cleanup, err := a.packageTemp(ctx, root)
 	if err != nil {
 		return "", "", err
 	}
 	defer cleanup()
-	a.printf("Uploading %s to %s…\n", name, t.session.Account.Target.Name)
-	uploadID, err := a.uploadBundle(ctx, t, bundle)
+	uploadID, err := a.uploadBundle(ctx, t, bundle, a.println)
 	if err != nil {
 		return "", "", err
 	}
+	a.printf("Adding %s to %s…\n", name, t.session.Account.Target.Name)
 	imported, err := t.client.Call(ctx, "import_theme", map[string]any{"storefront_id": t.storefrontID, "upload_id": uploadID})
 	if err != nil {
 		return "", "", err
@@ -237,4 +244,15 @@ func hasScopes(granted string, wanted []string) bool {
 		}
 	}
 	return true
+}
+
+// sizeLabel is a file size for progress lines, for example "1.4 MB".
+func sizeLabel(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%d KB", n>>10)
+	}
+	return fmt.Sprintf("%d bytes", n)
 }
