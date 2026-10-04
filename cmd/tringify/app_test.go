@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -80,7 +81,8 @@ func TestWriteStarterSettingsPointsTheStarterAtTheApp(t *testing.T) {
 	if !strings.Contains(string(vars), "TRINGIFY_WEBHOOK_SECRET=\n") || !strings.Contains(string(vars), "TOKEN_ENCRYPTION_KEY=") {
 		t.Fatalf(".dev.vars = %s", vars)
 	}
-	if info, _ := os.Stat(filepath.Join(dest, ".dev.vars")); info.Mode().Perm() != 0o600 {
+	// Windows has no Unix permission bits.
+	if info, _ := os.Stat(filepath.Join(dest, ".dev.vars")); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf(".dev.vars mode = %v", info.Mode().Perm())
 	}
 	os.WriteFile(filepath.Join(dest, "wrangler.jsonc"), []byte(`{}`), 0o644)
