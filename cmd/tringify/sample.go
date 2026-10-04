@@ -86,7 +86,7 @@ func (a *app) uploadStoreImages(ctx context.Context, t *storeTarget, root string
 		contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(name)))
 		items = append(items, map[string]any{"original_filename": name, "mime_type": contentType, "size_bytes": info.Size()})
 	}
-	data, err := t.client.Call(ctx, "create_file_uploads", map[string]any{"file_type": "upload", "items": items})
+	data, err := t.client.Call(ctx, "create_file_uploads", map[string]any{"library": "media", "items": items})
 	if err != nil {
 		return nil, err
 	}
@@ -112,13 +112,13 @@ func (a *app) uploadStoreImages(ctx context.Context, t *storeTarget, root string
 		ids = append(ids, intent.IntentID)
 		byIntent[intent.IntentID] = names[i]
 	}
-	if _, err := t.client.Call(ctx, "finalize_file_uploads", map[string]any{"file_type": "upload", "intent_ids": ids}); err != nil {
+	if _, err := t.client.Call(ctx, "finalize_file_uploads", map[string]any{"library": "media", "intent_ids": ids}); err != nil {
 		return nil, err
 	}
 	out := map[string]string{}
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
-		data, err := t.client.Call(ctx, "get_file_upload_status", map[string]any{"file_type": "upload", "intent_ids": ids})
+		data, err := t.client.Call(ctx, "get_file_upload_status", map[string]any{"library": "media", "intent_ids": ids})
 		if err != nil {
 			return nil, err
 		}

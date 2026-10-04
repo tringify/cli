@@ -124,15 +124,20 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any) (an
 		return nil, fmt.Errorf("tool %s returned no result", name)
 	}
 	structured, _ := result["structuredContent"].(map[string]any)
-	if structured == nil {
-		// Fall back to the text content, which carries the same JSON.
-		if content, ok := result["content"].([]any); ok && len(content) > 0 {
-			if first, ok := content[0].(map[string]any); ok {
-				_ = json.Unmarshal([]byte(fmt.Sprint(first["text"])), &structured)
-			}
+	text := ""
+	if content, ok := result["content"].([]any); ok && len(content) > 0 {
+		if first, ok := content[0].(map[string]any); ok {
+			text, _ = first["text"].(string)
 		}
 	}
 	if structured == nil {
+		// Fall back to the text content, which carries the same JSON.
+		_ = json.Unmarshal([]byte(text), &structured)
+	}
+	if structured == nil {
+		if isErr, _ := result["isError"].(bool); isErr && strings.TrimSpace(text) != "" {
+			return nil, &ToolError{Message: strings.TrimSpace(text)}
+		}
 		return nil, fmt.Errorf("tool %s returned an unexpected result", name)
 	}
 	if isErr, _ := result["isError"].(bool); isErr || structured["success"] == false {
