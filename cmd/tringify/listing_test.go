@@ -81,6 +81,9 @@ func TestConfirmNeedsAnAnswerOrATerminal(t *testing.T) {
 	if ok, err := confirm(strings.NewReader("\n"), &out, "Publish?"); err != nil || ok {
 		t.Fatalf("empty answer published: %v %v", ok, err)
 	}
+	if _, err := confirm(strings.NewReader(""), &out, "Publish?"); err == nil || !strings.Contains(err.Error(), "--yes") {
+		t.Fatalf("no answer: %v", err)
+	}
 	// A pipe is not a terminal: refuse instead of guessing.
 	r, w, err := os.Pipe()
 	if err != nil {
