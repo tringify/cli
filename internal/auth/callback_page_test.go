@@ -10,7 +10,7 @@ func TestCallbackPageEscapesTheMessageAndLoadsNothing(t *testing.T) {
 	if strings.Contains(page, "<script>") || !strings.Contains(page, "&lt;script&gt;") {
 		t.Fatal("error text was not escaped")
 	}
-	if strings.Contains(page, "http://") || strings.Contains(page, "https://") || strings.Contains(page, "src=") {
+	if strings.Contains(page, "http://") || strings.Contains(page, "https://") || !strings.Contains(page, `src="data:image/webp;base64,`) {
 		t.Fatal("callback page must not load anything from the network")
 	}
 	if !strings.Contains(callbackPage(true, "You're signed in", "Go back"), "You&#39;re signed in") {
