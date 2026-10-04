@@ -281,9 +281,11 @@ func (a *app) packageTemp(ctx context.Context, root string) (string, string, fun
 	}
 	cleanup := func() { os.RemoveAll(work) }
 	out := filepath.Join(work, theme.Slug(name)+".zip")
-	if err := a.packageTo(ctx, root, out, "sealed", ""); err != nil {
+	// A temporary package is an internal step of push, dev, diff and
+	// publish; only `theme package` reports where it wrote one.
+	if _, err := themekit.Package(ctx, root, out, "sealed", a.tools("", "")); err != nil {
 		cleanup()
-		return "", "", nil, err
+		return "", "", nil, fmt.Errorf("theme packaging failed: %w", err)
 	}
 	return out, name, cleanup, nil
 }
