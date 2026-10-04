@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -151,11 +152,11 @@ func (c *Client) Login(ctx context.Context, opts LoginOptions) (*TokenResponse, 
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		message := "You are signed in to the Tringify CLI. You can close this window."
 		if res.err != nil {
-			message = "Sign-in did not complete: " + res.err.Error()
+			fmt.Fprint(w, callbackPage(false, "Sign-in did not complete", res.err.Error()+". Go back to your terminal and run the command again."))
+		} else {
+			fmt.Fprint(w, callbackPage(true, "You're signed in", "Go back to your terminal to continue. You can close this tab."))
 		}
-		fmt.Fprintf(w, "<!doctype html><meta charset=utf-8><title>Tringify CLI</title><body style=\"font-family:system-ui;padding:3rem\"><p>%s</p>", html.EscapeString(message))
 		select {
 		case results <- res:
 		default:
@@ -313,4 +314,27 @@ func (s *Session) ForceRefresh(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return s.Account.AccessToken, nil
+}
+
+//go:embed logo-white.webp
+var logoWhite []byte
+
+// callbackPage is the page the browser shows after sign-in: a white card on
+// the same dark backdrop as the consent screen, with the Tringify logo and a
+// monochrome mark. It is self-contained, so it loads nothing from the network.
+func callbackPage(ok bool, title, body string) string {
+	mark := `<path d="M7 12.5l3.2 3.2L17 9" />`
+	if !ok {
+		mark = `<path d="M8 8l8 8M16 8l-8 8" />`
+	}
+	logo := "data:image/webp;base64," + base64.StdEncoding.EncodeToString(logoWhite)
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tringify CLI</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:#0a0a0a;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#0a0a0a}
+.logo{display:block;width:48px;height:48px;object-fit:contain;margin:0 auto 24px}
+.card{width:100%;max-width:420px;background:#fff;border-radius:14px;padding:40px 32px;text-align:center;box-shadow:0 25px 50px -12px rgba(0,0,0,.6)}
+.mark{width:56px;height:56px;margin:0 auto 20px;border-radius:50%;display:grid;place-items:center;background:#f4f4f5}
+.mark svg{width:28px;height:28px;fill:none;stroke:#0a0a0a;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+h1{margin:0;font-size:22px;letter-spacing:-.01em}p{margin:10px 0 0;color:#71717a;font-size:14px;line-height:1.6}
+.cli{margin-top:24px;padding-top:16px;border-top:1px solid #e4e4e7;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:#a1a1aa}
+</style></head><body><main><img class="logo" src="` + logo + `" alt="Tringify"><div class="card"><div class="mark"><svg viewBox="0 0 24 24" aria-hidden="true">` + mark + `</svg></div><h1>` + html.EscapeString(title) + `</h1><p>` + html.EscapeString(body) + `</p><div class="cli">Tringify CLI</div></div></main></body></html>`
 }
