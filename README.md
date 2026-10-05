@@ -68,10 +68,9 @@ Create the listing itself (name, category, pricing, support details) in the [Dev
 
 ### Apps
 
-Create the app in the [Developer Portal](https://dev.tringify.com) under **Apps**, then:
-
 ```sh
-tringify app list                       # find the app's ID
+tringify app create --name "My app" --type standard --distribution private
+                                        # prints the app ID, client ID and client secret (shown once)
 tringify app init --app APP_ID          # project from the app starter, with tringify.app.json
 # edit tringify.app.json: scopes, webhook URL, admin URL, events
 tringify app config push                # shows what changes, then replaces the draft
@@ -114,7 +113,8 @@ tringify app release --all --notes "New settings page"       # private
 | `theme listings` | Lists your organization's theme listings and their IDs. |
 | `theme publish --listing ID --version X.Y.Z [--notes TEXT] [--breaking] [--install-store ID] [--yes] [DIR]` | Packages the theme, shows what changes compared with the newest published version, and publishes it as a new version of the listing once you confirm. Pass `--yes` to skip the question, for example in CI. |
 | `app list` | Lists your organization's apps and their IDs. |
-| `app init --app ID [DIR]` | Creates a project from [app-starter](https://github.com/tringify/app-starter) in a new directory (default: the app's slug), writes the app's configuration to `tringify.app.json`, sets the app and client IDs, and creates `.dev.vars` for local development. Copy the client secret and webhook signing secret into it from the Developer Portal. |
+| `app create --name NAME --type standard\|sales_channel --distribution private\|marketplace [--category ID --subcategory ID] [--description TEXT] [--json]` | Creates an app and prints its app ID, client ID and client secret. The secret is shown only in this output; to issue a new one, regenerate it in the Developer Portal. Sales channel apps need a category and subcategory, which set the channel type. With `--json` the result is JSON, for scripts and piping into a secret store. |
+| `app init --app ID [DIR]` | Creates a project from [app-starter](https://github.com/tringify/app-starter) in a new directory (default: the app's slug), writes the app's configuration to `tringify.app.json`, sets the app and client IDs, and creates `.dev.vars` for local development. Add the client secret from `app create` and the signing secret from `app webhook rotate-key` to it. |
 | `app config pull [--app ID] [--file PATH] [--yes]` | Writes the app's draft configuration to `tringify.app.json`. If the file exists and differs, shows the differences and asks first. |
 | `app config push [--file PATH] [--yes]` | Shows the fields that differ from the draft and, once you confirm, replaces the draft with the file. Unknown fields are refused. The saved values are written back to the file when the platform normalizes them, for example sorting scopes. |
 | `app install-link [--store DOMAIN] [--draft] [--expires 7d] [--uses 1]` | Prints a link that installs the app on a store. A private app installs its current draft; a marketplace app installs its published version, or with `--draft` its draft (development and transfer stores of your organization only). |
@@ -122,6 +122,7 @@ tringify app release --all --notes "New settings page"       # private
 | `app versions` | Lists the app's versions and their review status, or for a private app, the updates sent and how many stores accepted them. |
 | `app publish VERSION` | Publishes an approved version so stores can install it or update to it. |
 | `app webhook test` | Sends a signed `app.test` webhook to the app's webhook URL and reports what your endpoint answered. |
+| `app webhook rotate-key [--json]` | Issues a new webhook signing secret and prints it once. Deliveries signed with the previous secret stop verifying immediately, so update your app right after. |
 | `app deliveries [--status STATUS] [--limit N]` | Lists recent webhook deliveries with their status, attempts and your endpoint's last answer. |
 | `version` | Prints the CLI version. |
 
