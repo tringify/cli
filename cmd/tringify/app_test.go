@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -88,5 +89,58 @@ func TestWriteStarterSettingsPointsTheStarterAtTheApp(t *testing.T) {
 	os.WriteFile(filepath.Join(dest, "wrangler.jsonc"), []byte(`{}`), 0o644)
 	if err := writeStarterSettings(dest, "app-1", "app_client", "rocket", []byte("{}\n")); err == nil {
 		t.Fatal("an unexpected wrangler.jsonc was accepted")
+	}
+}
+
+func TestCreateAppSendsTheChoicesAndShowsTheSecretOnce(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/apps" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"success":true,"data":{"app":{"id":"A1","name":"Shop Channel","slug":"shop-channel"},"secrets":{"client_id":"cid","client_secret":"tcs_once"}}}`))
+	}))
+	defer srv.Close()
+	api := devapi.New(srv.URL, "org", fixedTokens{}, "test")
+	body := map[string]any{"name": "Shop Channel", "app_type": "sales_channel", "distribution": "private", "category_id": "sales_channels", "subcategory_id": "marketplaces"}
+
+	var out strings.Builder
+	if err := newApp(&out, &strings.Builder{}).createApp(context.Background(), api, body, false); err != nil {
+		t.Fatal(err)
+	}
+	if got["app_type"] != "sales_channel" || got["subcategory_id"] != "marketplaces" {
+		t.Fatalf("request = %v", got)
+	}
+	if !strings.Contains(out.String(), "App ID:         A1") || !strings.Contains(out.String(), "Client secret:  tcs_once") || !strings.Contains(out.String(), "shown only once") {
+		t.Fatalf("output = %q", out.String())
+	}
+
+	out.Reset()
+	if err := newApp(&out, &strings.Builder{}).createApp(context.Background(), api, body, true); err != nil {
+		t.Fatal(err)
+	}
+	var printed map[string]string
+	if err := json.Unmarshal([]byte(out.String()), &printed); err != nil || printed["app_id"] != "A1" || printed["client_secret"] != "tcs_once" || printed["client_id"] != "cid" {
+		t.Fatalf("json = %q %v", out.String(), err)
+	}
+}
+
+func TestRotateWebhookKeyPrintsTheNewSecret(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/apps/A1/webhooks/rotate-signing-key" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Write([]byte(`{"success":true,"data":{"signing_key":"whsec_new"}}`))
+	}))
+	defer srv.Close()
+	api := devapi.New(srv.URL, "org", fixedTokens{}, "test")
+	var out strings.Builder
+	if err := newApp(&out, &strings.Builder{}).rotateWebhookKey(context.Background(), api, "A1", true); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out.String()) != `{"app_id":"A1","webhook_signing_secret":"whsec_new"}` {
+		t.Fatalf("json = %q", out.String())
 	}
 }

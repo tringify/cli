@@ -47,6 +47,7 @@ Themes:
 
 Apps:
   app list              List your organization's apps
+  app create            Create an app
   app init              Create a project for an app from the app starter
   app config pull       Write the app's configuration to tringify.app.json
   app config push       Replace the app's draft configuration with tringify.app.json
@@ -55,6 +56,7 @@ Apps:
   app versions          List the app's versions
   app publish VERSION   Publish an approved version
   app webhook test      Send a test webhook to the app's webhook URL
+  app webhook rotate-key Issue a new webhook signing secret
   app deliveries        List recent webhook deliveries
 
 Development stores:

@@ -25,6 +25,8 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "list":
 		return a.appList(ctx, args[1:])
+	case "create":
+		return a.appCreate(ctx, args[1:])
 	case "init":
 		return a.appInit(ctx, args[1:])
 	case "config":
@@ -46,10 +48,15 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 	case "publish":
 		return a.appPublish(ctx, args[1:])
 	case "webhook":
-		if len(args) > 1 && args[1] == "test" {
-			return a.appWebhookTest(ctx, args[2:])
+		if len(args) > 1 {
+			switch args[1] {
+			case "test":
+				return a.appWebhookTest(ctx, args[2:])
+			case "rotate-key":
+				return a.appWebhookRotateKey(ctx, args[2:])
+			}
 		}
-		return errors.New("usage: tringify app webhook test")
+		return errors.New("usage: tringify app webhook test|rotate-key")
 	case "deliveries":
 		return a.appDeliveries(ctx, args[1:])
 	}
@@ -112,7 +119,7 @@ func (a *app) appList(ctx context.Context, args []string) error {
 		}
 	}
 	if len(data.Apps) == 0 {
-		a.printf("No apps in %s. Create one in the Developer Portal under Apps.\n", session.Account.Target.Name)
+		a.printf("No apps in %s. Create one with `tringify app create`.\n", session.Account.Target.Name)
 		return nil
 	}
 	for _, item := range data.Apps {
@@ -638,5 +645,102 @@ func (a *app) appInstallLink(ctx context.Context, args []string) error {
 		return appAccess(err)
 	}
 	a.println(link.InstallURL)
+	return nil
+}
+
+// appCreate creates an app. Its client secret is issued once, in this
+// command's output; nothing can read it again later.
+func (a *app) appCreate(ctx context.Context, args []string) error {
+	fs := newFlags("app create --name NAME --type standard|sales_channel --distribution private|marketplace [--category ID --subcategory ID] [--json]",
+		"Create an app in your organization. Sales channel apps need a category and subcategory; the subcategory sets the channel type. Run `tringify app init --app ID` next to start a project for it.")
+	name := fs.String("name", "", "app name")
+	appType := fs.String("type", "", "standard or sales_channel")
+	distribution := fs.String("distribution", "", "private (install links) or marketplace (App Store listing)")
+	category := fs.String("category", "", "category ID, for example sales_channels")
+	subcategory := fs.String("subcategory", "", "subcategory ID")
+	description := fs.String("description", "", "short description")
+	asJSON := fs.Bool("json", false, "print the result as JSON, for scripts and piping into a secret store")
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	body := map[string]any{"name": *name, "app_type": *appType, "distribution": *distribution}
+	for key, value := range map[string]string{"category_id": *category, "subcategory_id": *subcategory, "description": *description} {
+		if value != "" {
+			body[key] = value
+		}
+	}
+	api, _, err := a.devAPI()
+	if err != nil {
+		return err
+	}
+	return a.createApp(ctx, api, body, *asJSON)
+}
+
+func (a *app) createApp(ctx context.Context, api *devapi.Client, body map[string]any, asJSON bool) error {
+	var created struct {
+		App struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			Slug string `json:"slug"`
+		} `json:"app"`
+		Secrets struct {
+			ClientID     string `json:"client_id"`
+			ClientSecret string `json:"client_secret"`
+		} `json:"secrets"`
+	}
+	if err := api.Do(ctx, http.MethodPost, "/apps", body, &created); err != nil {
+		return appAccess(err)
+	}
+	if asJSON {
+		return json.NewEncoder(a.stdout).Encode(map[string]string{
+			"app_id": created.App.ID, "name": created.App.Name, "slug": created.App.Slug,
+			"client_id": created.Secrets.ClientID, "client_secret": created.Secrets.ClientSecret,
+		})
+	}
+	a.printf("Created %s\n\n", created.App.Name)
+	a.printf("App ID:         %s\n", created.App.ID)
+	a.printf("Client ID:      %s\n", created.Secrets.ClientID)
+	a.printf("Client secret:  %s\n\n", created.Secrets.ClientSecret)
+	a.println("Store the client secret now. It is shown only once; to issue a new one, regenerate it in the Developer Portal.")
+	return nil
+}
+
+// appWebhookRotateKey issues a new webhook signing secret. The old one stops
+// working at once, so update the app's secret right after.
+func (a *app) appWebhookRotateKey(ctx context.Context, args []string) error {
+	fs := newFlags("app webhook rotate-key [--json]", "Issue a new webhook signing secret. The previous secret stops verifying deliveries immediately, so update your app right after. The new secret is shown only in this command's output.")
+	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
+	file := fs.String("file", appconfig.FileName, "configuration file")
+	asJSON := fs.Bool("json", false, "print the result as JSON, for scripts and piping into a secret store")
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	appID, err := appTarget(*appFlag, *file)
+	if err != nil {
+		return err
+	}
+	api, _, err := a.devAPI()
+	if err != nil {
+		return err
+	}
+	return a.rotateWebhookKey(ctx, api, appID, *asJSON)
+}
+
+func (a *app) rotateWebhookKey(ctx context.Context, api *devapi.Client, appID string, asJSON bool) error {
+	var rotated struct {
+		SigningKey string `json:"signing_key"`
+	}
+	if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/webhooks/rotate-signing-key", nil, &rotated); err != nil {
+		return appAccess(err)
+	}
+	secret := rotated.SigningKey
+	if secret == "" {
+		return errors.New("the API did not return the new signing secret")
+	}
+	if asJSON {
+		return json.NewEncoder(a.stdout).Encode(map[string]string{"app_id": appID, "webhook_signing_secret": secret})
+	}
+	a.printf("Webhook signing secret:  %s\n\n", secret)
+	a.println("Store it now; it is shown only once. Deliveries signed with the previous secret no longer verify.")
 	return nil
 }
