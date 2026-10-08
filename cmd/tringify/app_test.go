@@ -144,3 +144,28 @@ func TestRotateWebhookKeyPrintsTheNewSecret(t *testing.T) {
 		t.Fatalf("json = %q", out.String())
 	}
 }
+
+func TestRotateClientSecretPrintsTheNewSecret(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/apps/A1/regenerate-secret" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Write([]byte(`{"success":true,"data":{"client_secret":"tcs_new"}}`))
+	}))
+	defer srv.Close()
+	api := devapi.New(srv.URL, "org", fixedTokens{}, "test")
+	var out strings.Builder
+	if err := newApp(&out, &strings.Builder{}).rotateClientSecret(context.Background(), api, "A1", true); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out.String()) != `{"app_id":"A1","client_secret":"tcs_new"}` {
+		t.Fatalf("json = %q", out.String())
+	}
+	out.Reset()
+	if err := newApp(&out, &strings.Builder{}).rotateClientSecret(context.Background(), api, "A1", false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Client secret:  tcs_new") || !strings.Contains(out.String(), "shown only once") {
+		t.Fatalf("output = %q", out.String())
+	}
+}

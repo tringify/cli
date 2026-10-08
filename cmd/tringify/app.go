@@ -57,6 +57,11 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 			}
 		}
 		return errors.New("usage: tringify app webhook test|rotate-key")
+	case "secret":
+		if len(args) > 1 && args[1] == "rotate" {
+			return a.appSecretRotate(ctx, args[2:])
+		}
+		return errors.New("usage: tringify app secret rotate")
 	case "deliveries":
 		return a.appDeliveries(ctx, args[1:])
 	}
@@ -701,7 +706,47 @@ func (a *app) createApp(ctx context.Context, api *devapi.Client, body map[string
 	a.printf("App ID:         %s\n", created.App.ID)
 	a.printf("Client ID:      %s\n", created.Secrets.ClientID)
 	a.printf("Client secret:  %s\n\n", created.Secrets.ClientSecret)
-	a.println("Store the client secret now. It is shown only once; to issue a new one, regenerate it in the Developer Portal.")
+	a.println("Store the client secret now. It is shown only once; to issue a new one, run tringify app secret rotate.")
+	return nil
+}
+
+// appSecretRotate issues a new client secret. The previous one stops
+// working at once, so update the app's secret right after.
+func (a *app) appSecretRotate(ctx context.Context, args []string) error {
+	fs := newFlags("app secret rotate [--json]", "Issue a new client secret. The previous secret stops working immediately, so update your app right after. The new secret is shown only in this command's output.")
+	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
+	file := fs.String("file", appconfig.FileName, "configuration file")
+	asJSON := fs.Bool("json", false, "print the result as JSON, for scripts and piping into a secret store")
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	appID, err := appTarget(*appFlag, *file)
+	if err != nil {
+		return err
+	}
+	api, _, err := a.devAPI()
+	if err != nil {
+		return err
+	}
+	return a.rotateClientSecret(ctx, api, appID, *asJSON)
+}
+
+func (a *app) rotateClientSecret(ctx context.Context, api *devapi.Client, appID string, asJSON bool) error {
+	var rotated struct {
+		ClientSecret string `json:"client_secret"`
+	}
+	if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/regenerate-secret", nil, &rotated); err != nil {
+		return appAccess(err)
+	}
+	secret := rotated.ClientSecret
+	if secret == "" {
+		return errors.New("the API did not return the new client secret")
+	}
+	if asJSON {
+		return json.NewEncoder(a.stdout).Encode(map[string]string{"app_id": appID, "client_secret": secret})
+	}
+	a.printf("Client secret:  %s\n\n", secret)
+	a.println("Store it now; it is shown only once. The previous client secret no longer works.")
 	return nil
 }
 
