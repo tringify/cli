@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -713,12 +715,16 @@ func (a *app) createApp(ctx context.Context, api *devapi.Client, body map[string
 // appSecretRotate issues a new client secret. The previous one stops
 // working at once, so update the app's secret right after.
 func (a *app) appSecretRotate(ctx context.Context, args []string) error {
-	fs := newFlags("app secret rotate [--json]", "Issue a new client secret. The previous secret stops working immediately, so update your app right after. The new secret is shown only in this command's output.")
+	fs := newFlags("app secret rotate [--pipe-to COMMAND | --json]", "Issue a new client secret. The previous secret stops working immediately, so update your app right after. The new secret is shown only in this command's output, or, with --pipe-to, handed to your secret store without being shown.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	asJSON := fs.Bool("json", false, "print the result as JSON, for scripts and piping into a secret store")
+	pipeTo := fs.String("pipe-to", "", "command that stores the new secret, given on its standard input; the secret is not printed")
 	if _, err := parse(fs, args); err != nil {
 		return err
+	}
+	if *pipeTo != "" && *asJSON {
+		return errors.New("use --pipe-to or --json, not both")
 	}
 	appID, err := appTarget(*appFlag, *file)
 	if err != nil {
@@ -728,10 +734,10 @@ func (a *app) appSecretRotate(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	return a.rotateClientSecret(ctx, api, appID, *asJSON)
+	return a.rotateClientSecret(ctx, api, appID, *asJSON, *pipeTo)
 }
 
-func (a *app) rotateClientSecret(ctx context.Context, api *devapi.Client, appID string, asJSON bool) error {
+func (a *app) rotateClientSecret(ctx context.Context, api *devapi.Client, appID string, asJSON bool, pipeTo string) error {
 	var rotated struct {
 		ClientSecret string `json:"client_secret"`
 	}
@@ -741,6 +747,9 @@ func (a *app) rotateClientSecret(ctx context.Context, api *devapi.Client, appID 
 	secret := rotated.ClientSecret
 	if secret == "" {
 		return errors.New("the API did not return the new client secret")
+	}
+	if pipeTo != "" {
+		return a.storeSecret(ctx, "client secret", secret, pipeTo)
 	}
 	if asJSON {
 		return json.NewEncoder(a.stdout).Encode(map[string]string{"app_id": appID, "client_secret": secret})
@@ -753,12 +762,16 @@ func (a *app) rotateClientSecret(ctx context.Context, api *devapi.Client, appID 
 // appWebhookRotateKey issues a new webhook signing secret. The old one stops
 // working at once, so update the app's secret right after.
 func (a *app) appWebhookRotateKey(ctx context.Context, args []string) error {
-	fs := newFlags("app webhook rotate-key [--json]", "Issue a new webhook signing secret. The previous secret stops verifying deliveries immediately, so update your app right after. The new secret is shown only in this command's output.")
+	fs := newFlags("app webhook rotate-key [--pipe-to COMMAND | --json]", "Issue a new webhook signing secret. The previous secret stops verifying deliveries immediately, so update your app right after. The new secret is shown only in this command's output, or, with --pipe-to, handed to your secret store without being shown.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	asJSON := fs.Bool("json", false, "print the result as JSON, for scripts and piping into a secret store")
+	pipeTo := fs.String("pipe-to", "", "command that stores the new secret, given on its standard input; the secret is not printed")
 	if _, err := parse(fs, args); err != nil {
 		return err
+	}
+	if *pipeTo != "" && *asJSON {
+		return errors.New("use --pipe-to or --json, not both")
 	}
 	appID, err := appTarget(*appFlag, *file)
 	if err != nil {
@@ -768,10 +781,10 @@ func (a *app) appWebhookRotateKey(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	return a.rotateWebhookKey(ctx, api, appID, *asJSON)
+	return a.rotateWebhookKey(ctx, api, appID, *asJSON, *pipeTo)
 }
 
-func (a *app) rotateWebhookKey(ctx context.Context, api *devapi.Client, appID string, asJSON bool) error {
+func (a *app) rotateWebhookKey(ctx context.Context, api *devapi.Client, appID string, asJSON bool, pipeTo string) error {
 	var rotated struct {
 		SigningKey string `json:"signing_key"`
 	}
@@ -782,10 +795,33 @@ func (a *app) rotateWebhookKey(ctx context.Context, api *devapi.Client, appID st
 	if secret == "" {
 		return errors.New("the API did not return the new signing secret")
 	}
+	if pipeTo != "" {
+		return a.storeSecret(ctx, "webhook signing secret", secret, pipeTo)
+	}
 	if asJSON {
 		return json.NewEncoder(a.stdout).Encode(map[string]string{"app_id": appID, "webhook_signing_secret": secret})
 	}
 	a.printf("Webhook signing secret:  %s\n\n", secret)
 	a.println("Store it now; it is shown only once. Deliveries signed with the previous secret no longer verify.")
+	return nil
+}
+
+// storeSecret hands a newly issued secret to the developer's own secret store
+// command on its standard input, so it never appears on screen. Any host
+// works: wrangler, gcloud, fly, vercel, a password manager. The command runs
+// in the system shell so it can be written as it would be typed.
+func (a *app) storeSecret(ctx context.Context, what, secret, command string) error {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, "cmd", "/C", command)
+	} else {
+		cmd = exec.CommandContext(ctx, "sh", "-c", command)
+	}
+	cmd.Stdin = strings.NewReader(secret)
+	cmd.Stdout, cmd.Stderr = a.stderr, a.stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("a new %s was issued, but %q failed (%v). The previous %s no longer works and the new one was not shown; run this command again to issue another", what, command, err, what)
+	}
+	a.printf("Issued a new %s and stored it with: %s\n", what, command)
 	return nil
 }
