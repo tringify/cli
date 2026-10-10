@@ -122,8 +122,8 @@ tringify app release --all --notes "New settings page"       # private
 | `app versions` | Lists the app's versions and their review status, or for a private app, the updates sent and how many stores accepted them. |
 | `app publish VERSION` | Publishes an approved version so stores can install it or update to it. |
 | `app webhook test` | Sends a signed `app.test` webhook to the app's webhook URL and reports what your endpoint answered. |
-| `app webhook rotate-key [--json]` | Issues a new webhook signing secret and prints it once. Deliveries signed with the previous secret stop verifying immediately, so update your app right after. |
-| `app secret rotate [--json]` | Issues a new client secret and prints it once. The previous secret stops working immediately, so update your app right after. With `--json` the result is JSON, for piping into a secret store, for example `tringify app secret rotate --json \| jq -r .client_secret \| npx wrangler secret put TRINGIFY_CLIENT_SECRET`. |
+| `app webhook rotate-key [--pipe-to COMMAND \| --json]` | Issues a new webhook signing secret and prints it once. Deliveries signed with the previous secret stop verifying immediately, so update your app right after. `--pipe-to` stores it without printing it, as for `app secret rotate`. |
+| `app secret rotate [--pipe-to COMMAND \| --json]` | Issues a new client secret. The previous secret stops working immediately, so update your app right after. `--pipe-to` hands the new secret to your host's secret command on its standard input and never prints it, for example `--pipe-to "npx wrangler secret put TRINGIFY_CLIENT_SECRET"` or `--pipe-to "gcloud secrets versions add tringify-client-secret --data-file=-"`. Without it the secret is printed once; `--json` prints it as JSON. |
 | `app deliveries [--status STATUS] [--limit N]` | Lists recent webhook deliveries with their status, attempts and your endpoint's last answer. |
 | `version` | Prints the CLI version. |
 

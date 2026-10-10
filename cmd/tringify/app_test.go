@@ -137,7 +137,7 @@ func TestRotateWebhookKeyPrintsTheNewSecret(t *testing.T) {
 	defer srv.Close()
 	api := devapi.New(srv.URL, "org", fixedTokens{}, "test")
 	var out strings.Builder
-	if err := newApp(&out, &strings.Builder{}).rotateWebhookKey(context.Background(), api, "A1", true); err != nil {
+	if err := newApp(&out, &strings.Builder{}).rotateWebhookKey(context.Background(), api, "A1", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(out.String()) != `{"app_id":"A1","webhook_signing_secret":"whsec_new"}` {
@@ -155,17 +155,45 @@ func TestRotateClientSecretPrintsTheNewSecret(t *testing.T) {
 	defer srv.Close()
 	api := devapi.New(srv.URL, "org", fixedTokens{}, "test")
 	var out strings.Builder
-	if err := newApp(&out, &strings.Builder{}).rotateClientSecret(context.Background(), api, "A1", true); err != nil {
+	if err := newApp(&out, &strings.Builder{}).rotateClientSecret(context.Background(), api, "A1", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(out.String()) != `{"app_id":"A1","client_secret":"tcs_new"}` {
 		t.Fatalf("json = %q", out.String())
 	}
 	out.Reset()
-	if err := newApp(&out, &strings.Builder{}).rotateClientSecret(context.Background(), api, "A1", false); err != nil {
+	if err := newApp(&out, &strings.Builder{}).rotateClientSecret(context.Background(), api, "A1", false, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "Client secret:  tcs_new") || !strings.Contains(out.String(), "shown only once") {
 		t.Fatalf("output = %q", out.String())
+	}
+}
+
+// --pipe-to hands the new secret to the given command on its standard input
+// and never prints it; a failing command is reported with what to do next.
+func TestRotateClientSecretPipesItIntoTheSecretStore(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX shell command")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"success":true,"data":{"client_secret":"tcs_piped"}}`))
+	}))
+	defer srv.Close()
+	api := devapi.New(srv.URL, "org", fixedTokens{}, "test")
+	stored := filepath.Join(t.TempDir(), "secret")
+	var out, errOut strings.Builder
+	if err := newApp(&out, &errOut).rotateClientSecret(context.Background(), api, "A1", false, "cat > "+stored); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(stored); string(got) != "tcs_piped" {
+		t.Fatalf("stored = %q", got)
+	}
+	if strings.Contains(out.String()+errOut.String(), "tcs_piped") {
+		t.Fatalf("the secret was printed: %q %q", out.String(), errOut.String())
+	}
+	err := newApp(&out, &errOut).rotateClientSecret(context.Background(), api, "A1", false, "exit 3")
+	if err == nil || !strings.Contains(err.Error(), "run this command again") || strings.Contains(err.Error(), "tcs_piped") {
+		t.Fatalf("failing store: %v", err)
 	}
 }
