@@ -368,7 +368,7 @@ func (a *app) themeListings(ctx context.Context, args []string) error {
 	// GET /org/themes without paging returns the listings as an array.
 	list := listAt(data, "")
 	if len(list) == 0 {
-		a.printf("No theme listings in %s. Create one in the Developer Portal under Themes.\n", session.Account.Target.Name)
+		a.printf("No theme listings in %s. Create one with `tringify theme create`.\n", session.Account.Target.Name)
 		return nil
 	}
 	for _, l := range list {

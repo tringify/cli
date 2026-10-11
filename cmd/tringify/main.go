@@ -43,6 +43,10 @@ Themes:
   theme pull            Download a store theme or a published version into a new directory
   theme diff            Compare the theme with a published version of your listing
   theme listings        List your organization's theme listings
+  theme create          Create a free theme listing
+  theme update          Change a listing's text, category, screenshots and style covers
+  theme categories      List the Theme Store categories
+  theme submit          Submit a listing for Theme Store review
   theme publish         Publish the theme as a new version of a listing
 
 Apps:
@@ -176,6 +180,14 @@ func (a *app) theme(ctx context.Context, args []string) error {
 		return a.themeListings(ctx, args[1:])
 	case "publish":
 		return a.themePublish(ctx, args[1:])
+	case "create":
+		return a.themeCreate(ctx, args[1:])
+	case "update":
+		return a.themeUpdate(ctx, args[1:])
+	case "submit":
+		return a.themeSubmit(ctx, args[1:])
+	case "categories":
+		return a.themeCategories(ctx, args[1:])
 	}
 	return fmt.Errorf("unknown theme command %q", args[0])
 }
