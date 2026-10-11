@@ -765,7 +765,7 @@ func (a *app) rotateClientSecret(ctx context.Context, api *devapi.Client, appID 
 // request also carries a signature made with the previous secret, so the app
 // keeps verifying while the new one is deployed.
 func (a *app) appWebhookRotateKey(ctx context.Context, args []string) error {
-	fs := newFlags("app webhook rotate-key [--pipe-to COMMAND | --json]", "Issue a new webhook signing secret. For 72 hours, webhooks and other signed requests also carry a second signature made with the previous secret, so your app keeps verifying while you deploy the new one; the output says exactly when the previous secret stops being sent. Rotating again during that time stops sending the oldest secret at once. Run `tringify app webhook finish-rotation` once the new secret is deployed. The new secret is shown only in this command's output, or, with --pipe-to, handed to your secret store without being shown.")
+	fs := newFlags("app webhook rotate-key [--pipe-to COMMAND | --json]", "Issue a new webhook signing secret. For 72 hours, webhooks and other signed requests also carry a second signature made with the previous secret, so your app keeps verifying while you deploy the new one; the output says exactly when signatures made with the previous secret stop. Rotating again during that time stops signatures made with the oldest secret at once. Run `tringify app webhook finish-rotation` once the new secret is deployed. The new secret is shown only in this command's output, or, with --pipe-to, handed to your secret store without being shown.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	asJSON := fs.Bool("json", false, "print the result as JSON, for scripts and piping into a secret store")
@@ -804,7 +804,7 @@ func (a *app) rotateWebhookKey(ctx context.Context, api *devapi.Client, appID st
 	if pipeTo != "" {
 		afterFailure := "The new one was not shown; run this command again to issue another"
 		if expires != nil {
-			afterFailure = fmt.Sprintf("The new one was not shown. Requests keep carrying a signature made with the secret your app uses now until %s. Running this command again stops sending that secret at once, so do it only when you can deploy the next secret right away", formatExpiry(*expires))
+			afterFailure = fmt.Sprintf("The new one was not shown. Until %s, requests also carry a signature made with the signing secret that was current before this command ran; if that secret came from an earlier rotation you never deployed, your app is not verifying with it. Running this command again stops those signatures at once, so do it only when you can deploy the next secret right away", formatExpiry(*expires))
 		}
 		if err := a.storeSecret(ctx, "webhook signing secret", secret, pipeTo, afterFailure); err != nil {
 			return err
@@ -827,17 +827,17 @@ func (a *app) printOverlap(expires *time.Time) {
 	if expires == nil {
 		return
 	}
-	a.printf("Until %s, requests also carry a signature made with the previous secret. Once the new secret is deployed, run `tringify app webhook finish-rotation` to stop sending the previous one sooner.\n", formatExpiry(*expires))
+	a.printf("Until %s, requests also carry a signature made with the previous secret. Once the new secret is deployed, run `tringify app webhook finish-rotation` to stop those signatures sooner.\n", formatExpiry(*expires))
 }
 
 func formatExpiry(t time.Time) string {
 	return t.UTC().Format("2006-01-02 15:04 UTC")
 }
 
-// appWebhookFinishRotation stops sending the previous webhook signing secret
-// before its 72 hours are up.
+// appWebhookFinishRotation stops signatures made with the previous webhook
+// signing secret before its 72 hours are up.
 func (a *app) appWebhookFinishRotation(ctx context.Context, args []string) error {
-	fs := newFlags("app webhook finish-rotation [--app ID] [--yes]", "Stop sending the previous webhook signing secret now instead of when its 72 hours end. Afterwards requests carry only the new secret's signature, so run this once the new secret is deployed everywhere you verify signatures.")
+	fs := newFlags("app webhook finish-rotation [--app ID] [--yes]", "Stop signing requests with the previous webhook signing secret now instead of when its 72 hours end. Afterwards requests carry only the new secret's signature, so run this once the new secret is deployed everywhere you verify signatures.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	yes := fs.Bool("yes", false, "finish without asking")
@@ -870,9 +870,9 @@ func (a *app) finishWebhookKeyRotation(ctx context.Context, api *devapi.Client, 
 		return nil
 	}
 	if !yes {
-		question := "Stop sending the previous signing secret now?"
+		question := "Stop signing requests with the previous signing secret now?"
 		if details.Rotation.PreviousKeyExpiresAt != nil {
-			question = fmt.Sprintf("Requests carry the previous signing secret until %s. Stop sending it now?", formatExpiry(*details.Rotation.PreviousKeyExpiresAt))
+			question = fmt.Sprintf("Requests carry a signature made with the previous signing secret until %s. Stop those signatures now?", formatExpiry(*details.Rotation.PreviousKeyExpiresAt))
 		}
 		ok, err := confirmWith(a.stdin, a.stdout, question, "Pass --yes to finish without confirming")
 		if err != nil || !ok {
@@ -894,6 +894,10 @@ func (a *app) finishWebhookKeyRotation(ctx context.Context, api *devapi.Client, 
 // works: wrangler, gcloud, fly, vercel, a password manager. The command runs
 // in the system shell so it can be written as it would be typed. afterFailure
 // tells the developer where they stand if the command fails.
+//
+// The command's output is never forwarded as is, since a command that echoes
+// its input would print the secret. Its standard output is discarded; if it
+// fails, its standard error is shown with the secret redacted.
 func (a *app) storeSecret(ctx context.Context, what, secret, command, afterFailure string) error {
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
@@ -901,9 +905,13 @@ func (a *app) storeSecret(ctx context.Context, what, secret, command, afterFailu
 	} else {
 		cmd = exec.CommandContext(ctx, "sh", "-c", command)
 	}
+	var childErr bytes.Buffer
 	cmd.Stdin = strings.NewReader(secret)
-	cmd.Stdout, cmd.Stderr = a.stderr, a.stderr
+	cmd.Stderr = &childErr
 	if err := cmd.Run(); err != nil {
+		if out := strings.TrimSpace(strings.ReplaceAll(childErr.String(), secret, "[redacted]")); out != "" {
+			fmt.Fprintf(a.stderr, "%s\n", out)
+		}
 		return fmt.Errorf("a new %s was issued, but %q failed (%v). %s", what, command, err, afterFailure)
 	}
 	a.printf("Issued a new %s and stored it with: %s\n", what, command)

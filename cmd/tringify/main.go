@@ -56,8 +56,8 @@ Apps:
   app versions          List the app's versions
   app publish VERSION   Publish an approved version
   app webhook test      Send a test webhook to the app's webhook URL
-  app webhook rotate-key Issue a new webhook signing secret; the previous one is still sent for 72 hours
-  app webhook finish-rotation Stop sending the previous webhook signing secret now
+  app webhook rotate-key Issue a new webhook signing secret; requests are also signed with the previous one for 72 hours
+  app webhook finish-rotation Stop signing requests with the previous webhook signing secret now
   app secret rotate     Issue a new client secret
   app deliveries        List recent webhook deliveries
 

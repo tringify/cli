@@ -177,9 +177,9 @@ func TestRotateWebhookKeyWithoutAPreviousSecret(t *testing.T) {
 	}
 }
 
-// --pipe-to never prints the secret but still says when the previous one stops
-// being sent; a failing store command warns that rotating again drops the
-// secret the app uses now.
+// --pipe-to never prints the secret but still says when signatures made with
+// the previous one stop; a failing store command names the secret that was
+// current before the rotation and warns that rotating again drops it.
 func TestRotateWebhookKeyPipesItAndStatesTheOverlap(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a POSIX shell command")
@@ -201,8 +201,39 @@ func TestRotateWebhookKeyPipesItAndStatesTheOverlap(t *testing.T) {
 		t.Fatalf("output = %q %q", out.String(), errOut.String())
 	}
 	err := newApp(&out, &errOut).rotateWebhookKey(context.Background(), api, "A1", false, "exit 3")
-	if err == nil || !strings.Contains(err.Error(), "until 2026-10-14 09:30 UTC") || !strings.Contains(err.Error(), "stops sending that secret at once") || strings.Contains(err.Error(), "whsec_piped") {
+	if err == nil || !strings.Contains(err.Error(), "Until 2026-10-14 09:30 UTC") || !strings.Contains(err.Error(), "current before this command ran") || !strings.Contains(err.Error(), "stops those signatures at once") || strings.Contains(err.Error(), "secret your app uses now") || strings.Contains(err.Error(), "whsec_piped") {
 		t.Fatalf("failing store: %v", err)
+	}
+}
+
+// A store command that echoes its input must not get the secret printed: its
+// standard output is dropped, and its standard error is redacted when it fails.
+func TestPipeToNeverForwardsTheSecretFromTheCommandsOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX shell command")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"success":true,"data":{"signing_key":"whsec_echoed","previous_key_expires_at":"2026-10-14T09:30:00Z"}}`))
+	}))
+	defer srv.Close()
+	api := devapi.New(srv.URL, "org", fixedTokens{}, "test")
+
+	var out, errOut strings.Builder
+	if err := newApp(&out, &errOut).rotateWebhookKey(context.Background(), api, "A1", false, "tee /dev/stderr"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String()+errOut.String(), "whsec_echoed") || !strings.Contains(out.String(), "stored it with: tee /dev/stderr") {
+		t.Fatalf("succeeding echo: %q %q", out.String(), errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	err := newApp(&out, &errOut).rotateWebhookKey(context.Background(), api, "A1", false, `read s; echo "bad secret: $s" >&2; echo "$s"; exit 3`)
+	if err == nil || strings.Contains(err.Error(), "whsec_echoed") {
+		t.Fatalf("failing echo: %v", err)
+	}
+	if strings.Contains(out.String()+errOut.String(), "whsec_echoed") || !strings.Contains(errOut.String(), "bad secret: [redacted]") {
+		t.Fatalf("failing echo: %q %q", out.String(), errOut.String())
 	}
 }
 
