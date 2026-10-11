@@ -56,9 +56,11 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 				return a.appWebhookTest(ctx, args[2:])
 			case "rotate-key":
 				return a.appWebhookRotateKey(ctx, args[2:])
+			case "finish-rotation":
+				return a.appWebhookFinishRotation(ctx, args[2:])
 			}
 		}
-		return errors.New("usage: tringify app webhook test|rotate-key")
+		return errors.New("usage: tringify app webhook test|rotate-key|finish-rotation")
 	case "secret":
 		if len(args) > 1 && args[1] == "rotate" {
 			return a.appSecretRotate(ctx, args[2:])
@@ -749,7 +751,7 @@ func (a *app) rotateClientSecret(ctx context.Context, api *devapi.Client, appID 
 		return errors.New("the API did not return the new client secret")
 	}
 	if pipeTo != "" {
-		return a.storeSecret(ctx, "client secret", secret, pipeTo)
+		return a.storeSecret(ctx, "client secret", secret, pipeTo, "The previous client secret no longer works and the new one was not shown; run this command again to issue another")
 	}
 	if asJSON {
 		return json.NewEncoder(a.stdout).Encode(map[string]string{"app_id": appID, "client_secret": secret})
@@ -759,10 +761,11 @@ func (a *app) rotateClientSecret(ctx context.Context, api *devapi.Client, appID 
 	return nil
 }
 
-// appWebhookRotateKey issues a new webhook signing secret. The old one stops
-// working at once, so update the app's secret right after.
+// appWebhookRotateKey issues a new webhook signing secret. For 72 hours every
+// request also carries a signature made with the previous secret, so the app
+// keeps verifying while the new one is deployed.
 func (a *app) appWebhookRotateKey(ctx context.Context, args []string) error {
-	fs := newFlags("app webhook rotate-key [--pipe-to COMMAND | --json]", "Issue a new webhook signing secret. The previous secret stops verifying deliveries immediately, so update your app right after. The new secret is shown only in this command's output, or, with --pipe-to, handed to your secret store without being shown.")
+	fs := newFlags("app webhook rotate-key [--pipe-to COMMAND | --json]", "Issue a new webhook signing secret. For 72 hours, webhooks and other signed requests also carry a second signature made with the previous secret, so your app keeps verifying while you deploy the new one; the output says exactly when signatures made with the previous secret stop. Rotating again during that time stops signatures made with the oldest secret at once. Run `tringify app webhook finish-rotation` once the new secret is deployed. The new secret is shown only in this command's output, or, with --pipe-to, handed to your secret store without being shown.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	asJSON := fs.Bool("json", false, "print the result as JSON, for scripts and piping into a secret store")
@@ -787,6 +790,8 @@ func (a *app) appWebhookRotateKey(ctx context.Context, args []string) error {
 func (a *app) rotateWebhookKey(ctx context.Context, api *devapi.Client, appID string, asJSON bool, pipeTo string) error {
 	var rotated struct {
 		SigningKey string `json:"signing_key"`
+		// Absent when the app had no secret before, so there is no overlap.
+		PreviousKeyExpiresAt *time.Time `json:"previous_key_expires_at"`
 	}
 	if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/webhooks/rotate-signing-key", nil, &rotated); err != nil {
 		return appAccess(err)
@@ -795,32 +800,119 @@ func (a *app) rotateWebhookKey(ctx context.Context, api *devapi.Client, appID st
 	if secret == "" {
 		return errors.New("the API did not return the new signing secret")
 	}
+	expires := rotated.PreviousKeyExpiresAt
 	if pipeTo != "" {
-		return a.storeSecret(ctx, "webhook signing secret", secret, pipeTo)
+		afterFailure := "The new one was not shown; run this command again to issue another"
+		if expires != nil {
+			afterFailure = fmt.Sprintf("The new one was not shown. Until %s, requests also carry a signature made with the signing secret that was current before this command ran; if that secret came from an earlier rotation you never deployed, your app is not verifying with it. Running this command again stops those signatures at once, so do it only when you can deploy the next secret right away", formatExpiry(*expires))
+		}
+		if err := a.storeSecret(ctx, "webhook signing secret", secret, pipeTo, afterFailure); err != nil {
+			return err
+		}
+		a.printOverlap(expires)
+		return nil
 	}
 	if asJSON {
-		return json.NewEncoder(a.stdout).Encode(map[string]string{"app_id": appID, "webhook_signing_secret": secret})
+		return json.NewEncoder(a.stdout).Encode(map[string]any{"app_id": appID, "webhook_signing_secret": secret, "previous_key_expires_at": expires})
 	}
 	a.printf("Webhook signing secret:  %s\n\n", secret)
-	a.println("Store it now; it is shown only once. Deliveries signed with the previous secret no longer verify.")
+	a.println("Store it now; it is shown only once.")
+	a.printOverlap(expires)
+	return nil
+}
+
+// printOverlap says until when requests still carry the previous secret's
+// signature.
+func (a *app) printOverlap(expires *time.Time) {
+	if expires == nil {
+		return
+	}
+	a.printf("Until %s, requests also carry a signature made with the previous secret. Once the new secret is deployed, run `tringify app webhook finish-rotation` to stop those signatures sooner.\n", formatExpiry(*expires))
+}
+
+func formatExpiry(t time.Time) string {
+	return t.UTC().Format("2006-01-02 15:04 UTC")
+}
+
+// appWebhookFinishRotation stops signatures made with the previous webhook
+// signing secret before its 72 hours are up.
+func (a *app) appWebhookFinishRotation(ctx context.Context, args []string) error {
+	fs := newFlags("app webhook finish-rotation [--app ID] [--yes]", "Stop signing requests with the previous webhook signing secret now instead of when its 72 hours end. Afterwards requests carry only the new secret's signature, so run this once the new secret is deployed everywhere you verify signatures.")
+	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
+	file := fs.String("file", appconfig.FileName, "configuration file")
+	yes := fs.Bool("yes", false, "finish without asking")
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	appID, err := appTarget(*appFlag, *file)
+	if err != nil {
+		return err
+	}
+	api, _, err := a.devAPI()
+	if err != nil {
+		return err
+	}
+	return a.finishWebhookKeyRotation(ctx, api, appID, *yes)
+}
+
+func (a *app) finishWebhookKeyRotation(ctx context.Context, api *devapi.Client, appID string, yes bool) error {
+	var details struct {
+		Rotation struct {
+			InProgress           bool       `json:"in_progress"`
+			PreviousKeyExpiresAt *time.Time `json:"previous_key_expires_at"`
+		} `json:"signing_key_rotation"`
+	}
+	if err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID), nil, &details); err != nil {
+		return appAccess(err)
+	}
+	if !details.Rotation.InProgress {
+		a.println("No signing secret rotation is in progress; requests carry only the current secret's signature.")
+		return nil
+	}
+	if !yes {
+		question := "Stop signing requests with the previous signing secret now?"
+		if details.Rotation.PreviousKeyExpiresAt != nil {
+			question = fmt.Sprintf("Requests carry a signature made with the previous signing secret until %s. Stop those signatures now?", formatExpiry(*details.Rotation.PreviousKeyExpiresAt))
+		}
+		ok, err := confirmWith(a.stdin, a.stdout, question, "Pass --yes to finish without confirming")
+		if err != nil || !ok {
+			if err == nil {
+				a.println("Rotation not finished.")
+			}
+			return err
+		}
+	}
+	if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/webhooks/finish-signing-key-rotation", nil, nil); err != nil {
+		return appAccess(err)
+	}
+	a.println("Finished the rotation. Requests now carry only the new signing secret's signature.")
 	return nil
 }
 
 // storeSecret hands a newly issued secret to the developer's own secret store
 // command on its standard input, so it never appears on screen. Any host
 // works: wrangler, gcloud, fly, vercel, a password manager. The command runs
-// in the system shell so it can be written as it would be typed.
-func (a *app) storeSecret(ctx context.Context, what, secret, command string) error {
+// in the system shell so it can be written as it would be typed. afterFailure
+// tells the developer where they stand if the command fails.
+//
+// The command's output is never forwarded as is, since a command that echoes
+// its input would print the secret. Its standard output is discarded; if it
+// fails, its standard error is shown with the secret redacted.
+func (a *app) storeSecret(ctx context.Context, what, secret, command, afterFailure string) error {
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		cmd = exec.CommandContext(ctx, "cmd", "/C", command)
 	} else {
 		cmd = exec.CommandContext(ctx, "sh", "-c", command)
 	}
+	var childErr bytes.Buffer
 	cmd.Stdin = strings.NewReader(secret)
-	cmd.Stdout, cmd.Stderr = a.stderr, a.stderr
+	cmd.Stderr = &childErr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("a new %s was issued, but %q failed (%v). The previous %s no longer works and the new one was not shown; run this command again to issue another", what, command, err, what)
+		if out := strings.TrimSpace(strings.ReplaceAll(childErr.String(), secret, "[redacted]")); out != "" {
+			fmt.Fprintf(a.stderr, "%s\n", out)
+		}
+		return fmt.Errorf("a new %s was issued, but %q failed (%v). %s", what, command, err, afterFailure)
 	}
 	a.printf("Issued a new %s and stored it with: %s\n", what, command)
 	return nil
