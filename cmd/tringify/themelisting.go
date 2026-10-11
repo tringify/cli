@@ -124,21 +124,34 @@ func (a *app) themeUpdate(ctx context.Context, args []string) error {
 	if err := api.Do(ctx, http.MethodGet, "/org/themes/"+url.PathEscape(*listing), nil, &current); err != nil {
 		return err
 	}
+	// The listing update replaces every field it is sent and clears the ones it
+	// is not, so start from the listing as it is and change only what was asked.
 	body := map[string]any{"name": str(current["name"])}
-	if *name != "" {
-		body["name"] = *name
+	for _, key := range []string{"tagline", "description", "category_id", "support_url", "terms_url"} {
+		if v := str(current[key]); v != "" {
+			body[key] = v
+		}
 	}
-	if *tagline != "" {
-		body["tagline"] = *tagline
+	if ids, ok := current["screenshot_file_ids"].([]any); ok && len(ids) > 0 {
+		body["screenshot_file_ids"] = ids
 	}
-	if *description != "" {
-		body["description"] = *description
+	if covers, ok := current["style_covers"].([]any); ok && len(covers) > 0 {
+		var keep []map[string]string
+		for _, c := range covers {
+			if m, ok := c.(map[string]any); ok && str(m["name"]) != "" && str(m["file_id"]) != "" {
+				keep = append(keep, map[string]string{"name": str(m["name"]), "file_id": str(m["file_id"])})
+			}
+		}
+		if len(keep) > 0 {
+			body["style_covers"] = keep
+		}
 	}
-	if *support != "" {
-		body["support_url"] = *support
-	}
-	if *terms != "" {
-		body["terms_url"] = *terms
+	changed := false
+	for key, v := range map[string]string{"name": *name, "tagline": *tagline, "description": *description, "support_url": *support, "terms_url": *terms} {
+		if v != "" {
+			body[key] = v
+			changed = true
+		}
 	}
 	if *category != "" {
 		id, err := categoryID(ctx, api, *category)
@@ -146,6 +159,7 @@ func (a *app) themeUpdate(ctx context.Context, args []string) error {
 			return err
 		}
 		body["category_id"] = id
+		changed = true
 	}
 	if len(screenshots) > 0 {
 		var ids []string
@@ -157,6 +171,7 @@ func (a *app) themeUpdate(ctx context.Context, args []string) error {
 			ids = append(ids, id)
 		}
 		body["screenshot_file_ids"] = ids
+		changed = true
 	}
 	if len(coverList) > 0 {
 		var list []map[string]string
@@ -168,8 +183,9 @@ func (a *app) themeUpdate(ctx context.Context, args []string) error {
 			list = append(list, map[string]string{"name": c.name, "file_id": id})
 		}
 		body["style_covers"] = list
+		changed = true
 	}
-	if len(body) == 1 && *name == "" {
+	if !changed {
 		return errors.New("nothing to change: pass at least one of the flags")
 	}
 	if err := api.Do(ctx, http.MethodPut, "/org/themes/"+url.PathEscape(*listing), body, nil); err != nil {
