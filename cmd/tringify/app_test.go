@@ -132,7 +132,7 @@ func TestRotateWebhookKeyPrintsTheNewSecret(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/apps/A1/webhooks/rotate-signing-key" {
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
-		w.Write([]byte(`{"success":true,"data":{"signing_key":"whsec_new"}}`))
+		w.Write([]byte(`{"success":true,"data":{"signing_key":"whsec_new","previous_key_expires_at":"2026-10-14T09:30:00Z"}}`))
 	}))
 	defer srv.Close()
 	api := devapi.New(srv.URL, "org", fixedTokens{}, "test")
@@ -140,8 +140,119 @@ func TestRotateWebhookKeyPrintsTheNewSecret(t *testing.T) {
 	if err := newApp(&out, &strings.Builder{}).rotateWebhookKey(context.Background(), api, "A1", true, ""); err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(out.String()) != `{"app_id":"A1","webhook_signing_secret":"whsec_new"}` {
+	if strings.TrimSpace(out.String()) != `{"app_id":"A1","previous_key_expires_at":"2026-10-14T09:30:00Z","webhook_signing_secret":"whsec_new"}` {
 		t.Fatalf("json = %q", out.String())
+	}
+	out.Reset()
+	if err := newApp(&out, &strings.Builder{}).rotateWebhookKey(context.Background(), api, "A1", false, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Webhook signing secret:  whsec_new", "shown only once", "Until 2026-10-14 09:30 UTC", "finish-rotation"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output lacks %q: %q", want, out.String())
+		}
+	}
+}
+
+// The first secret an app gets has nothing to overlap with.
+func TestRotateWebhookKeyWithoutAPreviousSecret(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"success":true,"data":{"signing_key":"whsec_first","previous_key_expires_at":null}}`))
+	}))
+	defer srv.Close()
+	api := devapi.New(srv.URL, "org", fixedTokens{}, "test")
+	var out strings.Builder
+	if err := newApp(&out, &strings.Builder{}).rotateWebhookKey(context.Background(), api, "A1", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out.String()) != `{"app_id":"A1","previous_key_expires_at":null,"webhook_signing_secret":"whsec_first"}` {
+		t.Fatalf("json = %q", out.String())
+	}
+	out.Reset()
+	if err := newApp(&out, &strings.Builder{}).rotateWebhookKey(context.Background(), api, "A1", false, ""); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "previous secret") {
+		t.Fatalf("output = %q", out.String())
+	}
+}
+
+// --pipe-to never prints the secret but still says when the previous one stops
+// being sent; a failing store command warns that rotating again drops the
+// secret the app uses now.
+func TestRotateWebhookKeyPipesItAndStatesTheOverlap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX shell command")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"success":true,"data":{"signing_key":"whsec_piped","previous_key_expires_at":"2026-10-14T09:30:00Z"}}`))
+	}))
+	defer srv.Close()
+	api := devapi.New(srv.URL, "org", fixedTokens{}, "test")
+	stored := filepath.Join(t.TempDir(), "secret")
+	var out, errOut strings.Builder
+	if err := newApp(&out, &errOut).rotateWebhookKey(context.Background(), api, "A1", false, "cat > "+stored); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(stored); string(got) != "whsec_piped" {
+		t.Fatalf("stored = %q", got)
+	}
+	if strings.Contains(out.String()+errOut.String(), "whsec_piped") || !strings.Contains(out.String(), "Until 2026-10-14 09:30 UTC") {
+		t.Fatalf("output = %q %q", out.String(), errOut.String())
+	}
+	err := newApp(&out, &errOut).rotateWebhookKey(context.Background(), api, "A1", false, "exit 3")
+	if err == nil || !strings.Contains(err.Error(), "until 2026-10-14 09:30 UTC") || !strings.Contains(err.Error(), "stops sending that secret at once") || strings.Contains(err.Error(), "whsec_piped") {
+		t.Fatalf("failing store: %v", err)
+	}
+}
+
+func TestFinishWebhookKeyRotation(t *testing.T) {
+	inProgress := true
+	finished := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/apps/A1":
+			if inProgress {
+				w.Write([]byte(`{"success":true,"data":{"id":"A1","signing_key_rotation":{"in_progress":true,"previous_key_expires_at":"2026-10-14T09:30:00Z"}}}`))
+			} else {
+				w.Write([]byte(`{"success":true,"data":{"id":"A1","signing_key_rotation":{"in_progress":false,"previous_key_expires_at":null}}}`))
+			}
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/apps/A1/webhooks/finish-signing-key-rotation":
+			finished++
+			w.Write([]byte(`{"success":true,"data":{}}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	api := devapi.New(srv.URL, "org", fixedTokens{}, "test")
+
+	var out strings.Builder
+	a := newApp(&out, &strings.Builder{})
+	a.stdin = strings.NewReader("n\n")
+	if err := a.finishWebhookKeyRotation(context.Background(), api, "A1", false); err != nil {
+		t.Fatal(err)
+	}
+	if finished != 0 || !strings.Contains(out.String(), "until 2026-10-14 09:30 UTC") || !strings.Contains(out.String(), "Rotation not finished.") {
+		t.Fatalf("declined: finished=%d output=%q", finished, out.String())
+	}
+
+	out.Reset()
+	a.stdin = strings.NewReader("y\n")
+	if err := a.finishWebhookKeyRotation(context.Background(), api, "A1", false); err != nil {
+		t.Fatal(err)
+	}
+	if finished != 1 || !strings.Contains(out.String(), "Finished the rotation.") {
+		t.Fatalf("confirmed: finished=%d output=%q", finished, out.String())
+	}
+
+	inProgress = false
+	out.Reset()
+	if err := a.finishWebhookKeyRotation(context.Background(), api, "A1", true); err != nil {
+		t.Fatal(err)
+	}
+	if finished != 1 || !strings.Contains(out.String(), "No signing secret rotation is in progress") {
+		t.Fatalf("nothing to finish: finished=%d output=%q", finished, out.String())
 	}
 }
 
