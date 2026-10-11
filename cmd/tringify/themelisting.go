@@ -15,12 +15,6 @@ import (
 	"github.com/tringify/cli/internal/upload"
 )
 
-// stringList is a repeatable string flag.
-type stringList []string
-
-func (s *stringList) String() string     { return strings.Join(*s, ", ") }
-func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
-
 func (a *app) themeCreate(ctx context.Context, args []string) error {
 	fs := newFlags("theme create --name NAME --slug SLUG [--support-url URL] [--terms-url URL]", "Create a free theme listing in your developer organization. Publish versions to it with `tringify theme publish`.")
 	name := fs.String("name", "", "listing name shown in the Theme Store")
