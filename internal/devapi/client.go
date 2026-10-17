@@ -83,25 +83,6 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, out any)
 	})
 }
 
-// Download fetches a binary reply, such as a theme package, with its headers.
-// Errors are reported the same way as Do's.
-func (c *Client) Download(ctx context.Context, path string, limit int64) ([]byte, http.Header, error) {
-	var raw []byte
-	var header http.Header
-	err := c.send(ctx, http.MethodGet, path, nil, "application/zip", func(resp *http.Response) error {
-		var err error
-		if raw, err = io.ReadAll(io.LimitReader(resp.Body, limit+1)); err != nil {
-			return err
-		}
-		if int64(len(raw)) > limit {
-			return fmt.Errorf("the download is larger than %d MB", limit>>20)
-		}
-		header = resp.Header
-		return nil
-	})
-	return raw, header, err
-}
-
 // send makes the request with a fresh access token, retrying once with a
 // refreshed token on 401, and hands a successful (2xx) response to read.
 func (c *Client) send(ctx context.Context, method, path string, payload []byte, accept string, read func(*http.Response) error) error {
