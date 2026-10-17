@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,7 +22,14 @@ func (fixedTokens) ForceRefresh(context.Context) (string, error) { return "token
 
 func versionsServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/r2/package" {
+			if r.Header.Get("Authorization") != "" || r.Header.Get("X-Organization-ID") != "" {
+				t.Error("API credentials sent to R2")
+			}
+			w.Write([]byte("PK-zip"))
+			return
+		}
 		if r.Header.Get("Authorization") != "Bearer token" || r.Header.Get("X-Organization-ID") != "org" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -33,9 +43,8 @@ func versionsServer(t *testing.T) *httptest.Server {
 		case "/api/v1/org/themes/L/versions":
 			w.Write([]byte(`{"success":true,"data":[{"id":"v3","version":"1.3.0","status":"draft"},{"id":"v2","version":"1.2.0","status":"published"},{"id":"v1","version":"1.1.0","status":"published"}]}`))
 		case "/api/v1/org/themes/L/versions/v2/package":
-			w.Header().Set("Content-Type", "application/zip")
-			w.Header().Set("Content-Disposition", `attachment; filename="aurora-1.2.0.zip"`)
-			w.Write([]byte("PK-zip"))
+			sum := sha256.Sum256([]byte("PK-zip"))
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"download_url": "https://" + r.Host + "/r2/package", "filename": "aurora-1.2.0.zip", "sha256": hex.EncodeToString(sum[:])}})
 		case "/api/v1/org/themes/L/versions/v1/package":
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte(`{"code":"NOT_FOUND","message":"Theme version not found"}`))
@@ -49,6 +58,7 @@ func TestResolveAndDownloadListingVersions(t *testing.T) {
 	srv := versionsServer(t)
 	defer srv.Close()
 	api := devapi.New(srv.URL, "org", fixedTokens{}, "test")
+	api.HTTP = srv.Client()
 	ctx := context.Background()
 	// Without a name: the newest published version, never a draft.
 	v, ok, err := resolveVersion(ctx, api, "L", "")

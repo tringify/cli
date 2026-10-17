@@ -3,10 +3,11 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -58,17 +59,45 @@ func resolveVersion(ctx context.Context, api *devapi.Client, listing, name strin
 	return listingVersion{}, false, nil
 }
 
-// downloadVersion returns the exact package a version was published with.
+// downloadVersion follows the version package URL and verifies its ZIP digest.
 func downloadVersion(ctx context.Context, api *devapi.Client, listing string, v listingVersion) ([]byte, string, error) {
-	raw, header, err := api.Download(ctx, "/org/themes/"+url.PathEscape(listing)+"/versions/"+url.PathEscape(v.ID)+"/package", maxPackageBytes)
+	var link struct {
+		DownloadURL string `json:"download_url"`
+		Filename    string `json:"filename"`
+		SHA256      string `json:"sha256"`
+	}
+	if err := api.Do(ctx, http.MethodGet, "/org/themes/"+url.PathEscape(listing)+"/versions/"+url.PathEscape(v.ID)+"/package", nil, &link); err != nil {
+		return nil, "", err
+	}
+	u, err := url.Parse(link.DownloadURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || link.Filename == "" {
+		return nil, "", errors.New("the Developer API returned an invalid download link")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link.DownloadURL, nil)
 	if err != nil {
 		return nil, "", err
 	}
-	_, params, err := mime.ParseMediaType(header.Get("Content-Disposition"))
-	if err != nil || params["filename"] == "" {
-		return nil, "", errors.New("the Developer API returned the package without a file name")
+	// This request goes directly to R2, with no API token or organization header.
+	resp, err := api.HTTP.Do(req)
+	if err != nil {
+		return nil, "", errors.New("the theme package download failed")
 	}
-	return raw, filepath.Base(params["filename"]), nil
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("the theme package download returned HTTP %d", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxPackageBytes+1))
+	if err != nil {
+		return nil, "", err
+	}
+	if len(raw) > maxPackageBytes {
+		return nil, "", errors.New("the theme package is too large")
+	}
+	digest := sha256.Sum256(raw)
+	if hex.EncodeToString(digest[:]) != link.SHA256 {
+		return nil, "", errors.New("the theme package failed its integrity check")
+	}
+	return raw, filepath.Base(link.Filename), nil
 }
 
 // pullListingVersion writes a published version's package into a new directory.
