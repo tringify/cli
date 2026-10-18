@@ -24,7 +24,7 @@ func TestValidVersionAndChangelog(t *testing.T) {
 			t.Errorf("%q accepted", v)
 		}
 	}
-	if got := Changelog(" Fixes. ", "abc"); got != "Fixes.\n\nSource commit: abc" {
+	if got := Changelog(" Fixes. "); got != "Fixes." {
 		t.Fatalf("changelog = %q", got)
 	}
 	if Slug("My Theme!") != "my-theme" || Slug("***") != "theme" {
