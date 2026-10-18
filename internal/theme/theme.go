@@ -185,14 +185,11 @@ var semverPattern = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*
 // ValidVersion reports whether v is a semantic version such as 1.2.0.
 func ValidVersion(v string) bool { return semverPattern.MatchString(v) }
 
-// Changelog adds the source commit to the release notes.
-func Changelog(notes, commit string) string {
-	line := "Source commit: " + commit
-	notes = strings.TrimSpace(notes)
-	if notes == "" {
-		return line
-	}
-	return notes + "\n\n" + line
+// Changelog returns the release notes stores see. The source commit is not
+// part of them: merchants read these notes in the update dialog and in
+// notifications, where a commit hash means nothing.
+func Changelog(notes string) string {
+	return strings.TrimSpace(notes)
 }
 
 // Unzip writes a theme package into dest, which must not exist yet. Only

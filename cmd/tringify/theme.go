@@ -378,7 +378,7 @@ func (a *app) themeListings(ctx context.Context, args []string) error {
 }
 
 func (a *app) themePublish(ctx context.Context, args []string) error {
-	fs := newFlags("theme publish --listing ID --version X.Y.Z [--yes] [DIR]", "Package the theme from a clean git checkout and publish it as a new version of an existing listing. It first shows the files that change compared with the newest published version and asks before publishing. The version records the source commit.")
+	fs := newFlags("theme publish --listing ID --version X.Y.Z [--yes] [DIR]", "Package the theme from a clean git checkout and publish it as a new version of an existing listing. It first shows the files that change compared with the newest published version and asks before publishing. It must run from a clean commit; the commit is shown in the output, not in the release notes.")
 	listing := fs.String("listing", "", "theme listing ID (see `tringify theme listings`)")
 	versionFlag := fs.String("version", "", "version to publish, for example 1.2.0")
 	notes := fs.String("notes", "", "release notes")
@@ -460,7 +460,7 @@ func (a *app) themePublish(ctx context.Context, args []string) error {
 		return err
 	}
 	var published map[string]any
-	body := map[string]any{"version": *versionFlag, "changelog": theme.Changelog(*notes, source.Commit), "is_breaking": *breaking, "upload_id": uploadID}
+	body := map[string]any{"version": *versionFlag, "changelog": theme.Changelog(*notes), "is_breaking": *breaking, "upload_id": uploadID}
 	if err := api.Do(ctx, http.MethodPost, "/org/themes/"+*listing+"/versions", body, &published); err != nil {
 		return err
 	}
