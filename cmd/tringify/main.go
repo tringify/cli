@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -58,6 +59,8 @@ Apps:
   app install-link      Create a link that installs the app on a store
   app release           Release the draft: a new version, or a private app update
   app versions          List the app's versions
+  app listing show      Show the app's App Store listing
+  app listing update    Change the listing's text, links, icon and screenshots
   app publish VERSION   Publish an approved version
   app webhook test      Send a test webhook to the app's webhook URL
   app webhook rotate-key Issue a new webhook signing secret; requests are also signed with the previous one for 72 hours
@@ -104,6 +107,7 @@ type app struct {
 	apiBase        string
 	devAPIBase     string
 	resolver       *themetools.Resolver
+	uploadHTTP     *http.Client // signed-URL uploads; nil means a 2-minute default
 }
 
 func newApp(stdout, stderr io.Writer) *app {
