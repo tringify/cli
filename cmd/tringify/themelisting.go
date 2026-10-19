@@ -246,8 +246,15 @@ func mediaType(path string) (string, error) {
 	return "", fmt.Errorf("%s must be a PNG, JPEG or WebP image", path)
 }
 
-// uploadListingMedia uploads one listing image and returns its file ID.
+// uploadListingMedia uploads one theme listing image and returns its file ID.
 func (a *app) uploadListingMedia(ctx context.Context, api devAPIDoer, path string) (string, error) {
+	return a.uploadMedia(ctx, api, path, "/org/themes/media/upload-intents", nil)
+}
+
+// uploadMedia uploads one image through an upload-intent endpoint (base, with
+// /finalize and /status beside it) and returns its file ID. extra adds fields
+// to the intent request, such as the file category.
+func (a *app) uploadMedia(ctx context.Context, api devAPIDoer, path, base string, extra map[string]any) (string, error) {
 	t, err := mediaType(path)
 	if err != nil {
 		return "", err
@@ -257,7 +264,11 @@ func (a *app) uploadListingMedia(ctx context.Context, api devAPIDoer, path strin
 		return "", err
 	}
 	var grant upload.Grant
-	if err := api.Do(ctx, http.MethodPost, "/org/themes/media/upload-intents", map[string]any{"original_name": filepath.Base(path), "mime_type": t, "size_bytes": info.Size()}, &grant); err != nil {
+	request := map[string]any{"original_name": filepath.Base(path), "mime_type": t, "size_bytes": info.Size()}
+	for k, v := range extra {
+		request[k] = v
+	}
+	if err := api.Do(ctx, http.MethodPost, base, request, &grant); err != nil {
 		return "", fmt.Errorf("%s: %w", filepath.Base(path), err)
 	}
 	if grant.Headers == nil {
@@ -266,11 +277,15 @@ func (a *app) uploadListingMedia(ctx context.Context, api devAPIDoer, path strin
 	if grant.Headers["Content-Type"] == "" {
 		grant.Headers["Content-Type"] = t
 	}
-	if err := upload.Put(ctx, &http.Client{Timeout: 2 * time.Minute}, grant, path); err != nil {
+	client := a.uploadHTTP
+	if client == nil {
+		client = &http.Client{Timeout: 2 * time.Minute}
+	}
+	if err := upload.Put(ctx, client, grant, path); err != nil {
 		return "", fmt.Errorf("%s: %w", filepath.Base(path), err)
 	}
 	ids := map[string]any{"intent_ids": []string{grant.IntentID}}
-	if err := api.Do(ctx, http.MethodPost, "/org/themes/media/upload-intents/finalize", ids, nil); err != nil {
+	if err := api.Do(ctx, http.MethodPost, base+"/finalize", ids, nil); err != nil {
 		return "", fmt.Errorf("%s: %w", filepath.Base(path), err)
 	}
 	deadline := time.Now().Add(2 * time.Minute)
@@ -286,7 +301,7 @@ func (a *app) uploadListingMedia(ctx context.Context, api devAPIDoer, path strin
 				} `json:"error"`
 			} `json:"intents"`
 		}
-		if err := api.Do(ctx, http.MethodPost, "/org/themes/media/upload-intents/status", ids, &status); err != nil {
+		if err := api.Do(ctx, http.MethodPost, base+"/status", ids, &status); err != nil {
 			return "", fmt.Errorf("%s: %w", filepath.Base(path), err)
 		}
 		if len(status.Intents) == 1 {
