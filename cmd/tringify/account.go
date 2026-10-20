@@ -32,7 +32,7 @@ func (a *app) signInWith(ctx context.Context, kind string, scopes []string) (*cr
 		return nil, err
 	}
 	client := a.authClient()
-	tokens, resource, err := client.Login(ctx, auth.LoginOptions{Kind: kind, Scopes: scopes, OpenBrowser: browser.Open, Print: a.println})
+	tokens, resource, err := client.Login(ctx, auth.LoginOptions{Kind: kind, Scopes: scopes, OpenBrowser: browser.Open, Print: a.println, Version: version})
 	if err != nil {
 		return nil, err
 	}
