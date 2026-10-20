@@ -75,7 +75,9 @@ type LoginOptions struct {
 	// OpenBrowser opens the authorization URL; the URL is always printed too.
 	OpenBrowser func(string) error
 	Print       func(string)
-	Timeout     time.Duration
+	// Version is shown in the browser page's footer.
+	Version string
+	Timeout time.Duration
 }
 
 func randomString(n int) (string, error) {
@@ -143,7 +145,7 @@ func (c *Client) Login(ctx context.Context, opts LoginOptions) (*TokenResponse, 
 			if q.Get("error") == "access_denied" {
 				res.err = errors.New("access was not approved")
 			} else {
-				res.err = fmt.Errorf("sign-in failed: %s", q.Get("error"))
+				res.err = errors.New("the sign-in service could not finish signing you in")
 			}
 		case q.Get("code") == "":
 			res.err = errors.New("the sign-in response had no authorization code")
@@ -152,11 +154,7 @@ func (c *Client) Login(ctx context.Context, opts LoginOptions) (*TokenResponse, 
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		if res.err != nil {
-			fmt.Fprint(w, callbackPage(false, "Sign-in did not complete", res.err.Error()+". Go back to your terminal and run the command again."))
-		} else {
-			fmt.Fprint(w, callbackPage(true, "You're signed in", "Go back to your terminal to continue. You can close this tab."))
-		}
+		fmt.Fprint(w, callbackPage(res.err, opts.Version))
 		select {
 		case results <- res:
 		default:
@@ -352,22 +350,46 @@ func (s *Session) ForceRefresh(ctx context.Context) (string, error) {
 //go:embed logo-white.webp
 var logoWhite []byte
 
-// callbackPage is the page the browser shows after sign-in: a white card on
-// the same dark backdrop as the consent screen, with the Tringify logo and a
-// monochrome mark. It is self-contained, so it loads nothing from the network.
-func callbackPage(ok bool, title, body string) string {
-	mark := `<path d="M7 12.5l3.2 3.2L17 9" />`
-	if !ok {
-		mark = `<path d="M8 8l8 8M16 8l-8 8" />`
+//go:embed logo-black.webp
+var logoBlack []byte
+
+// callbackPage is the page the browser shows after sign-in. It mirrors the
+// accounts.tringify.com sign-in surface (light and dark, monochrome) and is
+// self-contained, so it loads nothing from the network.
+func callbackPage(failure error, version string) string {
+	title, page, icon := "You're signed in", "Signed in · Tringify CLI", `<path d="M5 12.5l4.5 4.5L19 7.5"/>`
+	body := `<p>Return to your terminal to continue. You can close this tab.</p>`
+	if failure != nil {
+		title, page, icon = "Sign-in didn't complete", "Sign-in failed · Tringify CLI", `<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>`
+		msg := failure.Error()
+		if msg != "" {
+			msg = strings.ToUpper(msg[:1]) + msg[1:]
+		}
+		if !strings.HasSuffix(msg, ".") {
+			msg += "."
+		}
+		body = `<p>` + html.EscapeString(msg) + `</p><p>Return to your terminal and run <code>tringify login</code> again.</p>`
 	}
-	logo := "data:image/webp;base64," + base64.StdEncoding.EncodeToString(logoWhite)
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tringify CLI</title><style>
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:#0a0a0a;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#0a0a0a}
-.logo{display:block;width:48px;height:48px;object-fit:contain;margin:0 auto 24px}
-.card{width:100%;max-width:420px;background:#fff;border-radius:14px;padding:40px 32px;text-align:center;box-shadow:0 25px 50px -12px rgba(0,0,0,.6)}
-.mark{width:56px;height:56px;margin:0 auto 20px;border-radius:50%;display:grid;place-items:center;background:#f4f4f5}
-.mark svg{width:28px;height:28px;fill:none;stroke:#0a0a0a;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
-h1{margin:0;font-size:22px;letter-spacing:-.01em}p{margin:10px 0 0;color:#71717a;font-size:14px;line-height:1.6}
-.cli{margin-top:24px;padding-top:16px;border-top:1px solid #e4e4e7;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:#a1a1aa}
-</style></head><body><main><img class="logo" src="` + logo + `" alt="Tringify"><div class="card"><div class="mark"><svg viewBox="0 0 24 24" aria-hidden="true">` + mark + `</svg></div><h1>` + html.EscapeString(title) + `</h1><p>` + html.EscapeString(body) + `</p><div class="cli">Tringify CLI</div></div></main></body></html>`
+	footer := "Tringify CLI"
+	if version != "" && version != "dev" {
+		footer += " · v" + strings.TrimPrefix(version, "v")
+	}
+	black := "data:image/webp;base64," + base64.StdEncoding.EncodeToString(logoBlack)
+	white := "data:image/webp;base64," + base64.StdEncoding.EncodeToString(logoWhite)
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>` + page + `</title><style>
+:root{--page:#f5f5f5;--card:#fff;--border:#e5e5e5;--title:#0a0a0a;--body:#525252;--muted:#737373;--chip:#f5f5f5;--shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.06)}
+@media (prefers-color-scheme:dark){:root{--page:#0a0a0a;--card:#171717;--border:#262626;--title:#fafafa;--body:#a3a3a3;--muted:#737373;--chip:#262626;--shadow:none}}
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;display:grid;place-items:center;padding:24px 16px;background:var(--page);color:var(--body);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
+main{width:100%;max-width:400px;animation:in .15s ease-out}
+.logo{display:block;width:36px;height:36px;margin:0 auto 32px}.logo.dark{display:none}
+@media (prefers-color-scheme:dark){.logo.light{display:none}.logo.dark{display:block}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:32px;box-shadow:var(--shadow)}
+.icon{width:44px;height:44px;border-radius:50%;border:1.5px solid var(--title);display:grid;place-items:center;margin-bottom:20px}
+.icon svg{width:22px;height:22px;fill:none;stroke:var(--title);stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+h1{margin:0 0 8px;color:var(--title);font-size:22px;line-height:1.3;font-weight:600;letter-spacing:-.01em}
+p{margin:0}p+p{margin-top:8px}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--chip);color:var(--title);border-radius:6px;padding:2px 6px}
+.foot{margin-top:16px;text-align:center;font-size:13px;color:var(--muted)}
+@keyframes in{from{opacity:0}to{opacity:1}}@media (prefers-reduced-motion:reduce){main{animation:none}}
+</style></head><body><main><img class="logo light" src="` + black + `" alt="Tringify"><img class="logo dark" src="` + white + `" alt="Tringify"><div class="card"><div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true">` + icon + `</svg></div><h1>` + title + `</h1>` + body + `</div><div class="foot">` + html.EscapeString(footer) + `</div></main></body></html>`
 }
