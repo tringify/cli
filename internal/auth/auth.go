@@ -299,21 +299,54 @@ func (s *Session) AccessToken(ctx context.Context) (string, error) {
 	return s.ForceRefresh(ctx)
 }
 
-// ForceRefresh rotates the tokens now.
+// ForceRefresh rotates the tokens now. With a store, it holds the account's
+// refresh lock and re-reads the stored tokens first: when another process has
+// already rotated them, it uses that result instead of spending a refresh
+// token that is no longer current (which would revoke the connection).
 func (s *Session) ForceRefresh(ctx context.Context) (string, error) {
 	now := time.Now
 	if s.Now != nil {
 		now = s.Now
 	}
-	t, err := s.Auth.Refresh(ctx, s.Account)
+	if s.Store == nil {
+		t, err := s.Auth.Refresh(ctx, s.Account)
+		if err != nil {
+			return "", err
+		}
+		Apply(s.Account, t, now())
+		return s.Account.AccessToken, nil
+	}
+	a := s.Account
+	var token string
+	err := s.Store.WithAccountLock(a.APIBase, a.Target.Kind, a.Target.ID, func() error {
+		stored, err := s.Store.Load(a.APIBase, a.Target.Kind, a.Target.ID)
+		if err != nil {
+			return err
+		}
+		if stored == nil {
+			return ErrSignInRequired
+		}
+		if stored.RefreshToken != a.RefreshToken && stored.AccessToken != "" && now().Add(time.Minute).Before(stored.ExpiresAt) {
+			*s.Account = *stored
+			token = stored.AccessToken
+			return nil
+		}
+		t, err := s.Auth.Refresh(ctx, stored)
+		if err != nil {
+			return err
+		}
+		Apply(stored, t, now())
+		if err := s.Store.Save(*stored); err != nil {
+			return err
+		}
+		*s.Account = *stored
+		token = stored.AccessToken
+		return nil
+	})
 	if err != nil {
 		return "", err
 	}
-	Apply(s.Account, t, now())
-	if err := s.Store.Save(*s.Account); err != nil {
-		return "", err
-	}
-	return s.Account.AccessToken, nil
+	return token, nil
 }
 
 //go:embed logo-white.webp
