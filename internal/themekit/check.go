@@ -111,6 +111,13 @@ func CheckerFailure(stdout, stderr string) string {
 				continue
 			}
 			label := capitalize(strings.ReplaceAll(key, "_", " "))
+			if lines := diagnosticLines(value); lines != nil {
+				text += "\n  " + label + ":"
+				for _, line := range lines {
+					text += "\n    " + line
+				}
+				continue
+			}
 			var shown string
 			switch value.(type) {
 			case *pyjson.Object, []pyjson.Value:
@@ -127,23 +134,25 @@ func CheckerFailure(stdout, stderr string) string {
 }
 
 // Validate checks the theme's compiled files as they are, without
-// rebuilding, and returns the names of its compiled sections.
-func Validate(ctx context.Context, root, mode string, tools Tools) ([]string, error) {
+// rebuilding, and returns the names of its compiled sections and the
+// checker's warnings, one readable line each.
+func Validate(ctx context.Context, root, mode string, tools Tools) ([]string, []string, error) {
 	root, err := resolvePath(root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	dir, err := os.MkdirTemp("", "tringify-theme-check-")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer os.RemoveAll(dir)
 	archive := filepath.Join(dir, "theme.zip")
 	if _, err := WriteArchive(root, archive); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if _, err := CheckArchive(ctx, archive, mode, tools); err != nil {
-		return nil, err
+	stdout, err := CheckArchive(ctx, archive, mode, tools)
+	if err != nil {
+		return nil, nil, err
 	}
 	matches, _ := filepath.Glob(filepath.Join(root, "sections", "*"+SourceExt))
 	names := []string{}
@@ -151,7 +160,63 @@ func Validate(ctx context.Context, root, mode string, tools Tools) ([]string, er
 		names = append(names, strings.TrimSuffix(filepath.Base(m), SourceExt))
 	}
 	sortNames(names)
-	return names, nil
+	return names, Warnings(stdout), nil
+}
+
+// Warnings returns the warnings in a passing themecheck result, one line each.
+func Warnings(stdout string) []string {
+	payload, err := pyjson.Loads(stdout)
+	if err != nil {
+		return nil
+	}
+	obj, ok := payload.(*pyjson.Object)
+	if !ok {
+		return nil
+	}
+	value, _ := obj.Get("warnings")
+	return diagnosticLines(value)
+}
+
+// diagnosticLines renders a themecheck diagnostic list as
+// "file:line:column: message; fix" lines, or nil when value is not one.
+func diagnosticLines(value pyjson.Value) []string {
+	list, ok := value.([]pyjson.Value)
+	if !ok || len(list) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(list))
+	for _, item := range list {
+		d, ok := item.(*pyjson.Object)
+		if !ok {
+			return nil
+		}
+		field := func(key string) string {
+			v, _ := d.Get(key)
+			if v == nil {
+				return ""
+			}
+			return pyjson.Str(v)
+		}
+		if field("message") == "" {
+			return nil
+		}
+		where := field("file")
+		if line := field("line"); line != "" && line != "0" {
+			where += ":" + line
+			if col := field("column"); col != "" && col != "0" {
+				where += ":" + col
+			}
+		}
+		text := field("message")
+		if where != "" {
+			text = where + ": " + text
+		}
+		if fix := field("fix"); fix != "" {
+			text += "; " + fix
+		}
+		lines = append(lines, text)
+	}
+	return lines
 }
 
 // AuthorContract returns the theme author contract printed by themecheck.

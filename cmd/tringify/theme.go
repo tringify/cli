@@ -146,11 +146,21 @@ func (a *app) themeCheck(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	sections, err := themekit.Validate(ctx, root, *mode, a.tools(*checker, ""))
+	sections, warnings, err := themekit.Validate(ctx, root, *mode, a.tools(*checker, ""))
 	if err != nil {
 		return fmt.Errorf("theme validation failed: %w", err)
 	}
-	a.printf("theme validation passed: %d source sections\n", len(sections))
+	for _, w := range warnings {
+		a.printf("warning: %s\n", w)
+	}
+	switch len(warnings) {
+	case 0:
+		a.printf("theme validation passed: %d source sections\n", len(sections))
+	case 1:
+		a.printf("theme validation passed with 1 warning: %d source sections\n", len(sections))
+	default:
+		a.printf("theme validation passed with %d warnings: %d source sections\n", len(warnings), len(sections))
+	}
 	return nil
 }
 
