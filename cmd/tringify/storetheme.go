@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tringify/cli/internal/auth"
+	"github.com/tringify/cli/internal/download"
 	"github.com/tringify/cli/internal/mcp"
 	"github.com/tringify/cli/internal/theme"
 	"github.com/tringify/cli/internal/upload"
@@ -200,18 +200,15 @@ func (a *app) themePull(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	var pkg struct {
-		Filename  string `json:"filename"`
-		ZipBase64 string `json:"zip_base64"`
-	}
+	var pkg download.Link
 	if err := decode(data, &pkg); err != nil {
 		return err
 	}
-	raw, err := base64.StdEncoding.DecodeString(pkg.ZipBase64)
-	if err != nil || len(raw) == 0 {
-		return errors.New("the store returned no theme package")
+	raw, filename, err := download.Get(ctx, target.client.HTTP, pkg)
+	if err != nil {
+		return err
 	}
-	dir := strings.TrimSuffix(pkg.Filename, filepath.Ext(pkg.Filename))
+	dir := strings.TrimSuffix(filename, filepath.Ext(filename))
 	if len(positional) > 0 {
 		dir = positional[0]
 	}
