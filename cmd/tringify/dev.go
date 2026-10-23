@@ -98,8 +98,6 @@ func (a *app) themeDev(ctx context.Context, args []string) error {
 			themeID = ""
 		case th["is_active"] == true:
 			return fmt.Errorf("theme %s is the published theme; theme dev only syncs unpublished themes", themeID)
-		case str(th["source"]) != "uploaded":
-			return fmt.Errorf("theme %s was not added from a theme package; pick a theme added by theme push or theme dev", themeID)
 		}
 	}
 
