@@ -128,6 +128,8 @@ tringify app release --all --notes "New settings page"       # private
 | `app deliveries [--status STATUS] [--limit N]` | Lists recent webhook deliveries with their status, attempts and your endpoint's last answer. |
 | `version` | Prints the CLI version. |
 
+Theme downloads use a signed HTTPS link that expires after 10 minutes. The CLI downloads immediately, limits ZIP packages to 256 MiB, checks their size, and verifies the digest for listing versions. If a link expires, run the command again to request a fresh one. Downloads send no account credentials to the object store. The directory defaults to the ZIP filename without its extension; pass `DIR` to choose another new directory.
+
 Edit sections in `src/sections/<name>/` as `body.html`, `style.css` and `schema.json`, with shared styles in `src/_shared.css`, or write `sections/*.vasc` files directly. Keep `src/.generated-sections.json` in version control: it records which section files the build generated, so removing a section's source also removes its compiled file safely, and a compiled file you edited by hand is never deleted.
 
 If you used the `tringify-theme` command from the theme tools, every one of its commands is available as `tringify theme <command>` with the same options, rules and output, and works on the same theme files.
