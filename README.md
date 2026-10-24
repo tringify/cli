@@ -30,7 +30,7 @@ The CLI is a single binary and needs nothing else installed: no Python, Node.js 
 | Linux | `$XDG_CACHE_HOME/tringify/theme-tools` (usually `~/.cache/tringify/theme-tools`) |
 | Windows | `%LocalAppData%\tringify\theme-tools` |
 
-The CLI looks for a newer theme tools release at most once a day and keeps working offline with the one it has. To control this:
+The CLI looks for a newer theme tools release at most every 15 minutes and keeps working offline with the one it has. To control this:
 
 | Variable | Effect |
 | --- | --- |
