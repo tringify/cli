@@ -43,7 +43,7 @@ var Base = "https://github.com/" + repository
 
 // latestTTL is how long a resolved "latest" release is trusted before the
 // CLI asks GitHub again. Offline, the last resolved release keeps working.
-const latestTTL = 24 * time.Hour
+const latestTTL = 15 * time.Minute
 
 // Resolver locates, and when needed downloads, the theme tools binaries.
 type Resolver struct {
@@ -188,7 +188,7 @@ type latestRecord struct {
 }
 
 // latestTag resolves "latest" to a release tag, asking GitHub at most once
-// a day and falling back to the last answer when offline.
+// every 15 minutes and falling back to the last answer when offline.
 func (r *Resolver) latestTag(ctx context.Context) (string, error) {
 	file := filepath.Join(r.Cache, "latest.json")
 	var record latestRecord
