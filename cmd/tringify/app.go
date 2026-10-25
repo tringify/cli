@@ -41,6 +41,8 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 			}
 		}
 		return errors.New("usage: tringify app config pull|push")
+	case "block":
+		return a.appBlock(ctx, args[1:])
 	case "release":
 		return a.appRelease(ctx, args[1:])
 	case "install-link":
@@ -148,7 +150,7 @@ func (a *app) fetchConfig(ctx context.Context, api *devapi.Client, appID string)
 }
 
 func (a *app) appConfigPull(ctx context.Context, args []string) error {
-	fs := newFlags("app config pull [--app ID] [--file PATH]", "Write the app's draft configuration to "+appconfig.FileName+". If the file exists and differs, shows what would change and asks first.")
+	fs := newFlags("app config pull [--app ID] [--file PATH]", "Write the app's draft configuration to "+appconfig.FileName+", with each app block's source in blocks/<key>.vasc beside it. If the files exist and differ, shows what would change and asks first.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in the file)")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	yes := fs.Bool("yes", false, "overwrite without asking")
@@ -167,17 +169,22 @@ func (a *app) appConfigPull(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if local, _, readErr := appconfig.Read(*file); readErr == nil {
-		next, _ := appconfig.Parse(remote)
-		changes := appconfig.Diff(local, next)
-		if len(changes) == 0 {
-			a.printf("%s is up to date.\n", *file)
-			return nil
+	if fileExists(*file) {
+		local, _, _, readErr := appconfig.Load(*file)
+		if readErr != nil {
+			a.printf("Cannot compare with the local files: %v\n", readErr)
+		} else {
+			next, _ := appconfig.Parse(remote)
+			changes := appconfig.Diff(local, next)
+			if len(changes) == 0 {
+				a.printf("%s is up to date.\n", *file)
+				return nil
+			}
+			a.printf("Pulling would change %s:\n", *file)
+			a.printConfigChanges(changes)
 		}
-		a.printf("Pulling would change %s:\n", *file)
-		a.printConfigChanges(changes)
 		if !*yes {
-			ok, err := confirmWith(a.stdin, a.stdout, "Overwrite "+*file+"?", "Pass --yes to overwrite without confirming")
+			ok, err := confirmWith(a.stdin, a.stdout, "Overwrite "+*file+" and its block sources?", "Pass --yes to overwrite without confirming")
 			if err != nil || !ok {
 				if err == nil {
 					a.println("Nothing written.")
@@ -185,24 +192,45 @@ func (a *app) appConfigPull(ctx context.Context, args []string) error {
 				return err
 			}
 		}
-	} else if !errors.Is(readErr, os.ErrNotExist) {
-		return readErr
 	}
-	if err := os.WriteFile(*file, remote, 0o644); err != nil {
+	if err := a.writeConfig(*file, remote); err != nil {
 		return err
 	}
 	a.printf("Wrote %s.\n", *file)
 	return nil
 }
 
+func fileExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+// writeConfig writes a configuration as the API serves it: file, and each
+// block's source in its own file. It says which block files changed and
+// which in blocks/ no block uses any more.
+func (a *app) writeConfig(file string, config []byte) error {
+	written, unused, err := appconfig.Write(file, config)
+	if err != nil {
+		return err
+	}
+	for _, name := range written {
+		a.printf("Wrote %s.\n", name)
+	}
+	for _, name := range unused {
+		a.printf("%s is not a source of any block in %s; delete it if you no longer need it.\n", name, file)
+	}
+	return nil
+}
+
 func (a *app) appConfigPush(ctx context.Context, args []string) error {
-	fs := newFlags("app config push [--file PATH]", "Replace the app's draft configuration with "+appconfig.FileName+". Shows what changes and asks first. Fields left out of the file are cleared. The draft goes live only when you release it.")
+	fs := newFlags("app config push [--file PATH]", "Replace the app's draft configuration with "+appconfig.FileName+" and the block sources it names. Checks the app blocks first (see `tringify app block check`) and pushes nothing if they have problems. Shows what changes and asks first. Fields left out of the file are cleared. The draft goes live only when you release it.")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	yes := fs.Bool("yes", false, "replace without asking")
+	renderer := fs.String("renderer", "", rendererHelp)
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
-	local, raw, err := appconfig.Read(*file)
+	local, raw, _, err := appconfig.Load(*file)
 	if err != nil {
 		return err
 	}
@@ -223,6 +251,9 @@ func (a *app) appConfigPush(ctx context.Context, args []string) error {
 	if len(changes) == 0 {
 		a.println("No changes to push.")
 		return nil
+	}
+	if err := a.checkBlocks(ctx, *file, raw, *renderer); err != nil {
+		return fmt.Errorf("%w; nothing pushed", err)
 	}
 	a.println("Pushing changes the draft:")
 	a.printConfigChanges(changes)
@@ -248,7 +279,7 @@ func (a *app) appConfigPush(ctx context.Context, args []string) error {
 	}
 	savedDoc, _ := appconfig.Parse(formatted)
 	if len(appconfig.Diff(local, savedDoc)) > 0 {
-		if err := os.WriteFile(*file, formatted, 0o644); err != nil {
+		if err := a.writeConfig(*file, formatted); err != nil {
 			return err
 		}
 		a.printf("Updated %s with the values as saved.\n", *file)
@@ -305,7 +336,7 @@ func (a *app) appDistribution(ctx context.Context, api *devapi.Client, appID str
 }
 
 func (a *app) appRelease(ctx context.Context, args []string) error {
-	fs := newFlags("app release [--bump patch|minor|major] [--store ID]... [--notes TEXT]", "Release the app's draft. A marketplace app submits it as a new version: the previous version number with the part you name in --bump increased, where major marks the version as breaking. A private app sends it as an update to the installed stores you name with --store, or to all of them with --all; each store accepts it in its admin.")
+	fs := newFlags("app release [--bump patch|minor|major] [--store ID]... [--notes TEXT]", "Release the app's draft. Checks the draft's app blocks first (see `tringify app block check`) and releases nothing if they have problems. A marketplace app submits it as a new version: the previous version number with the part you name in --bump increased, where major marks the version as breaking. A private app sends it as an update to the installed stores you name with --store, or to all of them with --all; each store accepts it in its admin.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	bump := fs.String("bump", "", "marketplace apps: patch, minor or major")
@@ -314,6 +345,7 @@ func (a *app) appRelease(ctx context.Context, args []string) error {
 	fs.Var(&stores, "store", "private apps: an installed store to update (repeatable)")
 	all := fs.Bool("all", false, "private apps: update every installed store")
 	yes := fs.Bool("yes", false, "private apps: send without asking")
+	renderer := fs.String("renderer", "", rendererHelp)
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
@@ -325,16 +357,23 @@ func (a *app) appRelease(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Releasing with unpushed edits would ship something other than the file.
-	if local, _, readErr := appconfig.Read(*file); readErr == nil && local.AppID() == appID {
-		remote, err := a.fetchConfig(ctx, api, appID)
+	remote, err := a.fetchConfig(ctx, api, appID)
+	if err != nil {
+		return err
+	}
+	// Releasing with unpushed edits would ship something other than the files.
+	if doc, _, readErr := appconfig.Read(*file); readErr == nil && doc.AppID() == appID {
+		local, _, _, err := appconfig.Load(*file)
 		if err != nil {
 			return err
 		}
 		current, _ := appconfig.Parse(remote)
 		if len(appconfig.Diff(current, local)) > 0 {
-			return fmt.Errorf("%s differs from the draft. Run `tringify app config push` first", *file)
+			return fmt.Errorf("%s or a block source differs from the draft. Run `tringify app config push` first", *file)
 		}
+	}
+	if err := a.checkBlocks(ctx, *file, remote, *renderer); err != nil {
+		return fmt.Errorf("%w; nothing released", err)
 	}
 	distribution, err := a.appDistribution(ctx, api, appID)
 	if err != nil {

@@ -2,6 +2,9 @@
 // preview renderer (theme-preview-render) published with the Tringify theme
 // tools (https://github.com/tringify/theme-tools).
 //
+// Releases also carry the Canvas theme, packaged (canvas.zip), which
+// `tringify app block preview` shows app blocks in by default.
+//
 // Each binary is taken from, in order: its command-line option, its
 // environment variable (TRINGIFY_THEME_CHECK, TRINGIFY_THEME_PREVIEW), PATH,
 // and finally a copy the CLI downloads on first use. The download is the
@@ -95,6 +98,24 @@ func (r *Resolver) Tools(checker, renderer string) themekit.Tools {
 			return r.binary(ctx, renderer, "TRINGIFY_THEME_PREVIEW", "theme-preview-render")
 		},
 	}
+}
+
+// canvasFile is the packaged Canvas theme a release carries for previewing
+// app blocks.
+const canvasFile = "canvas.zip"
+
+// Canvas returns the packaged Canvas theme of the theme tools release, for
+// previewing app blocks in a theme that has app block slots.
+func (r *Resolver) Canvas(ctx context.Context) (string, error) {
+	dir, err := r.Dir(ctx)
+	if err != nil {
+		return "", err
+	}
+	file := filepath.Join(dir, canvasFile)
+	if info, err := os.Stat(file); err != nil || !info.Mode().IsRegular() {
+		return "", fmt.Errorf("the theme tools in %s do not include the Canvas theme; pass --theme DIR, a theme whose pages accept app blocks", dir)
+	}
+	return file, nil
 }
 
 func exe(name string) string {
@@ -349,7 +370,7 @@ func (r *Resolver) install(ctx context.Context, tag, dest string) error {
 		return fmt.Errorf("checksum mismatch for %s; refusing to install", archive)
 	}
 	staged := filepath.Join(work, "tools")
-	names := []string{exe("themecheck"), exe("theme-preview-render"), "VERSION", "LICENSE"}
+	names := []string{exe("themecheck"), exe("theme-preview-render"), "VERSION", "LICENSE", canvasFile}
 	if err := extract(zipPath, staged, "tringify-theme-tools", names); err != nil {
 		return err
 	}
@@ -362,7 +383,7 @@ func (r *Resolver) install(ctx context.Context, tag, dest string) error {
 	}
 	// The renderer goes first and the validator last, so a directory with
 	// both binaries is always a finished install.
-	for _, name := range []string{"VERSION", "LICENSE", exe("theme-preview-render"), exe("themecheck")} {
+	for _, name := range []string{"VERSION", "LICENSE", canvasFile, exe("theme-preview-render"), exe("themecheck")} {
 		source := filepath.Join(staged, name)
 		if _, err := os.Stat(source); err != nil {
 			continue
@@ -401,7 +422,7 @@ func extract(zipPath, dest, top string, names []string) error {
 			return err
 		}
 		perm := os.FileMode(0o644)
-		if base != "VERSION" && base != "LICENSE" {
+		if base != "VERSION" && base != "LICENSE" && base != canvasFile {
 			perm = 0o755
 		}
 		out, err := os.OpenFile(filepath.Join(dest, base), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)

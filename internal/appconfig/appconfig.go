@@ -97,11 +97,94 @@ func Diff(base, next Document) []Change {
 			changes = append(changes, Change{Field: name, Kind: "added", To: summary(to)})
 		case !inNext:
 			changes = append(changes, Change{Field: name, Kind: "removed", From: summary(from)})
-		case canonical(from) != canonical(to):
+		case canonical(from) == canonical(to):
+		case name == BlocksField:
+			changes = append(changes, diffBlocks(from, to)...)
+		default:
 			changes = append(changes, Change{Field: name, Kind: "changed", From: summary(from), To: summary(to)})
 		}
 	}
 	return changes
+}
+
+// diffBlocks lists block changes one block field at a time, sources by
+// their length.
+func diffBlocks(from, to json.RawMessage) []Change {
+	parse := func(raw json.RawMessage) ([]string, map[string]map[string]json.RawMessage) {
+		var list []map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &list)
+		var keys []string
+		byKey := map[string]map[string]json.RawMessage{}
+		for i, block := range list {
+			var key string
+			if json.Unmarshal(block["key"], &key) != nil || key == "" {
+				key = fmt.Sprintf("#%d", i+1)
+			}
+			if _, seen := byKey[key]; !seen {
+				keys = append(keys, key)
+			}
+			byKey[key] = block
+		}
+		return keys, byKey
+	}
+	fromKeys, before := parse(from)
+	toKeys, after := parse(to)
+	var changes []Change
+	for _, key := range fromKeys {
+		if _, ok := after[key]; !ok {
+			changes = append(changes, Change{Field: BlocksField + " " + key, Kind: "removed", From: "block"})
+		}
+	}
+	for _, key := range toKeys {
+		old, ok := before[key]
+		if !ok {
+			changes = append(changes, Change{Field: BlocksField + " " + key, Kind: "added", To: "block"})
+			continue
+		}
+		var names []string
+		for name := range old {
+			names = append(names, name)
+		}
+		for name := range after[key] {
+			if _, ok := old[name]; !ok {
+				names = append(names, name)
+			}
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			a, b := old[name], after[key][name]
+			if canonical(a) == canonical(b) {
+				continue
+			}
+			describe := summary
+			if name == "source" {
+				describe = lines
+			}
+			change := Change{Field: BlocksField + " " + key + "." + name, Kind: "changed", From: describe(a), To: describe(b)}
+			switch {
+			case a == nil:
+				change.Kind = "added"
+			case b == nil:
+				change.Kind = "removed"
+			}
+			changes = append(changes, change)
+		}
+	}
+	return changes
+}
+
+// lines describes a block source by its length.
+func lines(raw json.RawMessage) string {
+	var source string
+	_ = json.Unmarshal(raw, &source)
+	n := strings.Count(source, "\n")
+	if !strings.HasSuffix(source, "\n") && source != "" {
+		n++
+	}
+	if n == 1 {
+		return "1 line"
+	}
+	return fmt.Sprintf("%d lines", n)
 }
 
 func canonical(raw json.RawMessage) string {

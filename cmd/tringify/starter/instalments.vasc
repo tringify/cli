@@ -1,0 +1,33 @@
+{% schema %}
+{
+  "name": "Instalments",
+  "kind": "block",
+  "ctx_needs": ["product"],
+  "settings": [
+    {
+      "id": "payments",
+      "type": "range",
+      "min": 2,
+      "max": 12,
+      "step": 1,
+      "default": 3,
+      "editor": { "label": "Number of payments" }
+    }
+  ]
+}
+{% endschema %}
+{%- comment -%}
+  A template block: the storefront renders this markup into the product page
+  and caches it with the page. It reads only public product data and uses the
+  tf-ab-* classes, which take the theme's font and colours.
+  money_split divides the price into payments that add up to it exactly; the
+  first payment carries any remainder, so it is the one shown.
+{%- endcomment -%}
+{%- assign price = product.price.current -%}
+{%- if price -%}
+{%- assign parts = price | money_split: settings.payments -%}
+<p class="tf-ab-row tf-ab-small">
+  <span class="tf-ab-muted">or {{ settings.payments }} interest-free payments of</span>
+  <strong class="tf-ab-strong">{{ parts.first | money }}</strong>
+</p>
+{%- endif -%}

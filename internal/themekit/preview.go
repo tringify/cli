@@ -112,6 +112,11 @@ type Preview struct {
 	Tools    Tools
 	Out      io.Writer
 	Renderer string
+	// Bundle, when set, is a packaged theme previewed as it is, in place of
+	// building Root.
+	Bundle string
+	// Apps, when set, shows an app's blocks in the theme.
+	Apps *AppBlocks
 
 	mu        sync.Mutex
 	snapshot  map[string]asset
@@ -120,6 +125,16 @@ type Preview struct {
 	revision  int
 	errText   string
 	signature string
+	notes     string
+}
+
+// AppBlocks is an app's blocks shown in a preview: Load returns the app
+// configuration with each block's source inline, read again for every
+// build; the blocks that list Page go into that page's app block slot,
+// after the theme block of type After.
+type AppBlocks struct {
+	Load        func() ([]byte, error)
+	Page, After string
 }
 
 // NewPreview prepares a preview of root. Builds happen in temp.
@@ -166,9 +181,21 @@ func (p *Preview) Rebuild(ctx context.Context) bool {
 }
 
 func (p *Preview) rebuild(ctx context.Context) (bool, error) {
-	signature, err := SourceSignature(p.Root)
-	if err != nil {
-		return false, err
+	signature := ""
+	if p.Bundle == "" {
+		var err error
+		if signature, err = SourceSignature(p.Root); err != nil {
+			return false, err
+		}
+	}
+	var apps []byte
+	if p.Apps != nil {
+		var err error
+		if apps, err = p.Apps.Load(); err != nil {
+			p.signature = ""
+			return false, err
+		}
+		signature += "\x00" + sha256Hex(apps)
 	}
 	if signature == p.signature {
 		return false, nil
@@ -179,13 +206,24 @@ func (p *Preview) rebuild(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	defer os.RemoveAll(work)
-	bundle, output := filepath.Join(work, "theme.zip"), filepath.Join(work, "rendered")
-	if _, err := Package(ctx, p.Root, bundle, "sealed", p.Tools); err != nil {
-		return false, err
+	bundle, output := p.Bundle, filepath.Join(work, "rendered")
+	if bundle == "" {
+		bundle = filepath.Join(work, "theme.zip")
+		if _, err := Package(ctx, p.Root, bundle, "sealed", p.Tools); err != nil {
+			return false, err
+		}
+	}
+	args := []string{"--bundle", bundle, "--output", output, "--base", p.Base, "--preset", p.Preset}
+	if p.Apps != nil {
+		config := filepath.Join(work, "app.json")
+		if err := os.WriteFile(config, apps, 0o600); err != nil {
+			return false, err
+		}
+		args = append(args, "--app-blocks", config, "--page", p.Apps.Page, "--app-blocks-after", p.Apps.After)
 	}
 	runCtx, cancel := context.WithTimeout(ctx, renderTimeout)
 	defer cancel()
-	out, err := run(runCtx, p.Renderer, "--bundle", bundle, "--output", output, "--base", p.Base, "--preset", p.Preset)
+	out, err := run(runCtx, p.Renderer, args...)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return false, errors.New("theme rendering timed out after 90 seconds")
@@ -286,6 +324,19 @@ func (p *Preview) rebuild(ctx context.Context) (bool, error) {
 		return false, errors.New("rendered preview exceeds 128 MiB")
 	}
 	name, hasName := manifest.Get("name")
+	var notes []string
+	notesValue, _ := manifest.Get("notes")
+	if list, ok := notesValue.([]pyjson.Value); ok {
+		for _, note := range list {
+			notes = append(notes, pyjson.Str(note))
+		}
+	}
+	if joined := strings.Join(notes, "\n"); joined != p.notes {
+		p.notes = joined
+		for _, note := range notes {
+			fmt.Fprintf(p.Out, "App blocks: %s\n", note)
+		}
+	}
 	p.mu.Lock()
 	p.snapshot, p.name, p.pages = snapshot, name, pagesValue
 	p.revision++
@@ -423,6 +474,34 @@ func CheckHost(host string, port int) error {
 
 // Serve watches root and serves the preview on host:port until ctx ends.
 func Serve(ctx context.Context, root, host string, port int, preset string, tools Tools, out io.Writer) error {
+	return serve(ctx, host, port, tools, out, "Local sample preview. Shopper actions are disabled. Press Ctrl+C to stop.", func(temp, base, renderer string) (*Preview, error) {
+		return NewPreview(root, temp, base, renderer, preset, tools, out)
+	})
+}
+
+// ServeAppBlocks serves a preview of an app's blocks inside a theme: the
+// theme at root, or the packaged theme bundle when root is empty. It
+// rebuilds when the theme, the configuration or a block source changes.
+func ServeAppBlocks(ctx context.Context, root, bundle string, apps AppBlocks, host string, port int, preset string, tools Tools, out io.Writer) error {
+	return serve(ctx, host, port, tools, out, "Local sample preview of your app blocks, rendered as a store renders them. Shopper actions are disabled. Press Ctrl+C to stop.", func(temp, base, renderer string) (*Preview, error) {
+		var preview *Preview
+		if root != "" {
+			var err error
+			if preview, err = NewPreview(root, temp, base, renderer, preset, tools, out); err != nil {
+				return nil, err
+			}
+		} else {
+			preview = &Preview{
+				Temp: temp, Base: base, Renderer: renderer, Preset: preset, Tools: tools, Out: out, Bundle: bundle,
+				snapshot: map[string]asset{}, name: pyjson.String(filepath.Base(bundle)), pages: []pyjson.Value{},
+			}
+		}
+		preview.Apps = &apps
+		return preview, nil
+	})
+}
+
+func serve(ctx context.Context, host string, port int, tools Tools, out io.Writer, banner string, newPreview func(temp, base, renderer string) (*Preview, error)) error {
 	if err := CheckHost(host, port); err != nil {
 		return err
 	}
@@ -442,7 +521,7 @@ func Serve(ctx context.Context, root, host string, port int, preset string, tool
 		return err
 	}
 	defer os.RemoveAll(temp)
-	preview, err := NewPreview(root, temp, base, renderer, preset, tools, out)
+	preview, err := newPreview(temp, base, renderer)
 	if err != nil {
 		return err
 	}
@@ -474,7 +553,7 @@ func Serve(ctx context.Context, root, host string, port int, preset string, tool
 		}
 	}()
 	fmt.Fprintf(out, "Open http://%s:%d%s/studio\n", ip, actualPort, base)
-	fmt.Fprintln(out, "Local sample preview. Shopper actions are disabled. Press Ctrl+C to stop.")
+	fmt.Fprintln(out, banner)
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
 	select {

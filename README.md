@@ -22,7 +22,7 @@ The script checks the download against `SHA256SUMS`, installs `tringify.exe` in 
 
 Builds are available for macOS (Apple silicon and Intel), Linux (x86-64 and ARM64), and Windows (x86-64; Windows on Arm runs it too). To build from source: `go install github.com/tringify/cli/cmd/tringify@latest`.
 
-The CLI is a single binary and needs nothing else installed: no Python, Node.js or other runtime. The first time you check, package or preview a theme, it downloads the theme validator (`themecheck`) and preview renderer (`theme-preview-render`) from the [theme tools](https://github.com/tringify/theme-tools) release for your platform, verifies them against the release's `SHA256SUMS`, and keeps them in your user cache directory:
+The CLI is a single binary and needs nothing else installed: no Python, Node.js or other runtime. The first time you check, package or preview a theme, or check or preview app blocks, it downloads the theme validator (`themecheck`) and preview renderer (`theme-preview-render`) from the [theme tools](https://github.com/tringify/theme-tools) release for your platform, verifies them against the release's `SHA256SUMS`, and keeps them in your user cache directory. The release also carries the Canvas theme, packaged, which `app block preview` shows your blocks in.
 
 | System | Location |
 | --- | --- |
@@ -35,7 +35,7 @@ The CLI looks for a newer theme tools release at most every 15 minutes and keeps
 | Variable | Effect |
 | --- | --- |
 | `TRINGIFY_THEME_TOOLS_VERSION` | Use a specific theme tools release, for example `v0.1.0`. |
-| `TRINGIFY_THEME_TOOLS_HOME` | Keep the two binaries in this directory instead of the cache. |
+| `TRINGIFY_THEME_TOOLS_HOME` | Keep the theme tools in this directory instead of the cache. |
 | `TRINGIFY_THEME_CHECK`, `TRINGIFY_THEME_PREVIEW` | Use a `themecheck` or `theme-preview-render` you already have. The `--checker` and `--renderer` options do the same for one command. |
 
 ## Quick start
@@ -73,7 +73,8 @@ tringify app create --name "My app" --type standard --distribution private
                                         # prints the app ID, client ID and client secret (shown once)
 tringify app init --app APP_ID          # project from the app starter, with tringify.app.json
 # edit tringify.app.json: scopes, webhook URL, admin URL, events
-tringify app config push                # shows what changes, then replaces the draft
+tringify app block preview              # the example block, blocks/instalments.vasc, in Canvas
+tringify app config push                # checks the blocks, shows what changes, then replaces the draft
 tringify app webhook test               # sends a signed app.test webhook
 tringify app install-link --store my-store.mytringify.com
 ```
@@ -87,6 +88,34 @@ tringify app release --all --notes "New settings page"       # private
 ```
 
 `tringify.app.json` holds everything a release carries except the listing (name, descriptions, screenshots, pricing), which stays in the Developer Portal. Pushing replaces the whole draft: a field you delete from the file is cleared. Stores only see a change once you release a version and publish it.
+
+### App blocks
+
+App blocks are Vascula blocks merchants place in their theme. Each block's entry in `storefront_blocks` gives its `key`, `name`, `description`, `mode`, `pages` and, for hosted surfaces, `surface_key`; its source lives in its own file, named by `source_file`:
+
+```json
+"storefront_blocks": [
+  {
+    "key": "instalments",
+    "name": "Instalments",
+    "description": "Shows the product price split into equal interest-free payments.",
+    "mode": "template",
+    "pages": ["product"],
+    "source_file": "blocks/instalments.vasc"
+  }
+]
+```
+
+A `template` block is markup only: the storefront renders it into the page and caches it with the page, so it may read only `shop`, `routes`, `product` and `collection`. A `hosted_surface` block also opens one of the app's hosted surfaces after its markup and may read `cart` too. A block that reads `product` or `collection` data lists that page alone in `pages`. Block markup uses reading elements, links and images, styled with the platform's `tf-ab-*` classes, which take the theme's font and colours; scripts, styles, event handlers, forms, ids and data attributes are refused. `tringify theme contract` lists the exact elements, attributes and classes.
+
+```sh
+tringify app block check                # FILE:LINE: problems, as the platform would refuse them
+tringify app block context --page product   # the data each block receives on a product page
+tringify app block preview              # the blocks in Canvas, rebuilt as you edit
+tringify app block preview --theme ../my-theme --page collection
+```
+
+`app config push` and `app release` run the check first and stop if it finds a problem.
 
 ## Commands
 
@@ -114,11 +143,14 @@ tringify app release --all --notes "New settings page"       # private
 | `theme publish --listing ID --version X.Y.Z [--notes TEXT] [--breaking] [--install-store ID] [--yes] [DIR]` | Packages the theme, shows what changes compared with the newest published version, and publishes it as a new version of the listing once you confirm. Pass `--yes` to skip the question, for example in CI. |
 | `app list` | Lists your organization's apps and their IDs. |
 | `app create --name NAME --type standard\|sales_channel --distribution private\|marketplace [--category ID --subcategory ID] [--description TEXT] [--json]` | Creates an app and prints its app ID, client ID and client secret. The secret is shown only in this output; to issue a new one, run `app secret rotate`. Sales channel apps need a category and subcategory, which set the channel type. With `--json` the result is JSON, for scripts and piping into a secret store. |
-| `app init --app ID [DIR]` | Creates a project from [app-starter](https://github.com/tringify/app-starter) in a new directory (default: the app's slug), writes the app's configuration to `tringify.app.json`, sets the app and client IDs, and creates `.dev.vars` for local development. Add the client secret from `app create` and the signing secret from `app webhook rotate-key` to it. |
-| `app config pull [--app ID] [--file PATH] [--yes]` | Writes the app's draft configuration to `tringify.app.json`. If the file exists and differs, shows the differences and asks first. |
-| `app config push [--file PATH] [--yes]` | Shows the fields that differ from the draft and, once you confirm, replaces the draft with the file. Unknown fields are refused. The saved values are written back to the file when the platform normalizes them, for example sorting scopes. |
+| `app init --app ID [DIR]` | Creates a project from [app-starter](https://github.com/tringify/app-starter) in a new directory (default: the app's slug), writes the app's configuration to `tringify.app.json` and its block sources to `blocks/`, adds an example template block (`blocks/instalments.vasc`: the price split into payments, with the number of payments as a merchant setting), sets the app and client IDs, and creates `.dev.vars` for local development. Add the client secret from `app create` and the signing secret from `app webhook rotate-key` to it. |
+| `app config pull [--app ID] [--file PATH] [--yes]` | Writes the app's draft configuration to `tringify.app.json` and each block's source to `blocks/<key>.vasc`. If the files exist and differ, shows the differences and asks first. Lists `.vasc` files in `blocks/` that no block uses any more, and leaves them in place. |
+| `app config push [--file PATH] [--yes]` | Checks the app blocks, shows the fields that differ from the draft and, once you confirm, replaces the draft with the file and the block sources it names. Unknown fields are refused. The saved values are written back to the files when the platform normalizes them, for example sorting scopes. |
+| `app block check [--file PATH]` | Checks the app's blocks with the rules the platform applies when the configuration is pushed, and prints each problem as `FILE:LINE: message`. |
+| `app block context [--page PAGE] [--theme DIR] [--entity HANDLE]` | Prints the sample data each block that lists the page receives: the page's data cut to the block's `ctx_needs`. Uses the built-in sample catalog, or a theme's demo content with `--theme`. |
+| `app block preview [--theme DIR] [--page PAGE] [--after TYPE] [--port 9292]` | Serves a local preview of the theme (default: Canvas) with the app's blocks that list the page in its app block slot, after the theme block of type `--after` (default `price`). Blocks render as on a store: their mode's data only, the app markup policy, the page's app block budget and the `tf-ab-*` styles. Rebuilds when `tringify.app.json`, a block source or the theme changes. |
 | `app install-link [--store DOMAIN] [--draft] [--expires 7d] [--uses 1]` | Prints a link that installs the app on a store. A private app installs its current draft; a marketplace app installs its published version, or with `--draft` its draft (development and transfer stores of your organization only). |
-| `app release [--bump patch\|minor\|major] [--store ID]... [--all] [--notes TEXT]` | Releases the draft. A marketplace app submits it as a new version (`--bump`). A private app sends it as an update to the installed stores you name, or `--all` of them; each store accepts it in its admin. Refuses while `tringify.app.json` differs from the draft. |
+| `app release [--bump patch\|minor\|major] [--store ID]... [--all] [--notes TEXT]` | Releases the draft. A marketplace app submits it as a new version (`--bump`). A private app sends it as an update to the installed stores you name, or `--all` of them; each store accepts it in its admin. Refuses while `tringify.app.json` or a block source differs from the draft, or the draft's blocks fail `app block check`. |
 | `app versions` | Lists the app's versions and their review status, or for a private app, the updates sent and how many stores accepted them. |
 | `app publish VERSION` | Publishes an approved version so stores can install it or update to it. |
 | `app webhook test` | Sends a signed `app.test` webhook to the app's webhook URL and reports what your endpoint answered. |
