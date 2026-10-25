@@ -22,7 +22,7 @@ The script checks the download against `SHA256SUMS`, installs `tringify.exe` in 
 
 Builds are available for macOS (Apple silicon and Intel), Linux (x86-64 and ARM64), and Windows (x86-64; Windows on Arm runs it too). To build from source: `go install github.com/tringify/cli/cmd/tringify@latest`.
 
-The CLI is a single binary and needs nothing else installed: no Python, Node.js or other runtime. The first time you check, package or preview a theme, or check or preview app blocks, it downloads the theme validator (`themecheck`) and preview renderer (`theme-preview-render`) from the [theme tools](https://github.com/tringify/theme-tools) release for your platform, verifies them against the release's `SHA256SUMS`, and keeps them in your user cache directory. The release also carries the Canvas theme, packaged, which `app block preview` shows your blocks in.
+The CLI is a single binary and needs nothing else installed: no Python, Node.js or other runtime. The first time you check, package or preview a theme, or check or preview app blocks, it downloads the theme validator (`themecheck`) and preview renderer (`theme-preview-render`) from the [theme tools](https://github.com/tringify/theme-tools) release for your platform, verifies them against the release's `SHA256SUMS`, and keeps them in your user cache directory.
 
 | System | Location |
 | --- | --- |
@@ -73,7 +73,7 @@ tringify app create --name "My app" --type standard --distribution private
                                         # prints the app ID, client ID and client secret (shown once)
 tringify app init --app APP_ID          # project from the app starter, with tringify.app.json
 # edit tringify.app.json: scopes, webhook URL, admin URL, events
-tringify app block preview              # the example block, blocks/instalments.vasc, in Canvas
+tringify app block preview              # the example block, blocks/instalments.vasc, in the starter theme
 tringify app config push                # checks the blocks, shows what changes, then replaces the draft
 tringify app webhook test               # sends a signed app.test webhook
 tringify app install-link --store my-store.mytringify.com
@@ -111,7 +111,7 @@ A `template` block is markup only: the storefront renders it into the page and c
 ```sh
 tringify app block check                # FILE:LINE: problems, as the platform would refuse them
 tringify app block context --page product   # the data each block receives on a product page
-tringify app block preview              # the blocks in Canvas, rebuilt as you edit
+tringify app block preview              # the blocks in the starter theme, rebuilt as you edit
 tringify app block preview --theme ../my-theme --page collection
 ```
 
@@ -148,7 +148,7 @@ tringify app block preview --theme ../my-theme --page collection
 | `app config push [--file PATH] [--yes]` | Checks the app blocks, shows the fields that differ from the draft and, once you confirm, replaces the draft with the file and the block sources it names. Unknown fields are refused. The saved values are written back to the files when the platform normalizes them, for example sorting scopes. |
 | `app block check [--file PATH]` | Checks the app's blocks with the rules the platform applies when the configuration is pushed, and prints each problem as `FILE:LINE: message`. |
 | `app block context [--page PAGE] [--theme DIR] [--entity HANDLE]` | Prints the sample data each block that lists the page receives: the page's data cut to the block's `ctx_needs`. Uses the built-in sample catalog, or a theme's demo content with `--theme`. |
-| `app block preview [--theme DIR] [--page PAGE] [--after TYPE] [--port 9292]` | Serves a local preview of the theme (default: Canvas) with the app's blocks that list the page in its app block slot, after the theme block of type `--after` (default `price`). Blocks render as on a store: their mode's data only, the app markup policy, the page's app block budget and the `tf-ab-*` styles. Rebuilds when `tringify.app.json`, a block source or the theme changes. |
+| `app block preview [--theme DIR] [--page PAGE] [--after TYPE] [--port 9292]` | Serves a local preview of the theme (default: the [starter theme](https://github.com/tringify/theme-starter), downloaded as `theme init` does) with the app's blocks that list the page in its app block slot, after the theme block of type `--after` (default `price`). Blocks render as on a store: their mode's data only, the app markup policy, the page's app block budget and the `tf-ab-*` styles. Rebuilds when `tringify.app.json`, a block source or the theme changes. |
 | `app install-link [--store DOMAIN] [--draft] [--expires 7d] [--uses 1]` | Prints a link that installs the app on a store. A private app installs its current draft; a marketplace app installs its published version, or with `--draft` its draft (development and transfer stores of your organization only). |
 | `app release [--bump patch\|minor\|major] [--store ID]... [--all] [--notes TEXT]` | Releases the draft. A marketplace app submits it as a new version (`--bump`). A private app sends it as an update to the installed stores you name, or `--all` of them; each store accepts it in its admin. Refuses while `tringify.app.json` or a block source differs from the draft, or the draft's blocks fail `app block check`. |
 | `app versions` | Lists the app's versions and their review status, or for a private app, the updates sent and how many stores accepted them. |

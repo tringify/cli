@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"path/filepath"
+	"time"
 
 	"github.com/tringify/cli/internal/appconfig"
 	"github.com/tringify/cli/internal/pyjson"
+	"github.com/tringify/cli/internal/theme"
 	"github.com/tringify/cli/internal/themekit"
 )
 
@@ -120,9 +123,9 @@ func (a *app) appBlockContext(ctx context.Context, args []string) error {
 }
 
 func (a *app) appBlockPreview(ctx context.Context, args []string) error {
-	fs := newFlags("app block preview [--theme DIR] [--page product] [--after TYPE] [--port 9292]", "Serve a local preview of the app's blocks inside a theme, rendered as a store renders them: each block that lists --page goes into that page's app block slot, reads only the data its mode allows, and must pass the app markup policy and the page's app block budget; template blocks get the tf-ab-* styles. Uses the Canvas theme from the theme tools unless --theme names another. The preview rebuilds when tringify.app.json, a block source or the theme changes. Press Ctrl+C to stop.")
+	fs := newFlags("app block preview [--theme DIR] [--page product] [--after TYPE] [--port 9292]", "Serve a local preview of the app's blocks inside a theme, rendered as a store renders them: each block that lists --page goes into that page's app block slot, reads only the data its mode allows, and must pass the app markup policy and the page's app block budget; template blocks get the tf-ab-* styles. Uses the starter theme (the one `tringify theme init` starts from, downloaded from github.com/tringify/theme-starter) unless --theme names another theme. The preview rebuilds when tringify.app.json, a block source or the theme changes. Press Ctrl+C to stop.")
 	file := fs.String("file", appconfig.FileName, "configuration file")
-	themeDir := fs.String("theme", "", "theme directory (default: the Canvas theme from the theme tools)")
+	themeDir := fs.String("theme", "", "theme directory (default: the starter theme)")
 	page := fs.String("page", "product", "page type whose app block slot shows the blocks")
 	after := fs.String("after", "price", "theme block type the app blocks follow in the slot; last when the slot has none")
 	host := fs.String("host", "127.0.0.1", "specific IPv4 interface; pass this computer's LAN address to preview from another device")
@@ -138,20 +141,21 @@ func (a *app) appBlockPreview(ctx context.Context, args []string) error {
 	if _, _, _, err := appconfig.Load(*file); err != nil {
 		return err
 	}
-	tools := a.tools(*checker, *renderer)
-	root, bundle := "", ""
+	root := ""
 	if *themeDir != "" {
 		var err error
 		if root, err = filepath.Abs(*themeDir); err != nil {
 			return err
 		}
 	} else {
-		// a.tools set up the resolver.
-		var err error
-		if bundle, err = a.resolver.Canvas(ctx); err != nil {
+		a.println("Downloading the starter theme…")
+		starter, cleanup, err := theme.DownloadStarter(ctx, &http.Client{Timeout: 2 * time.Minute})
+		if err != nil {
 			return err
 		}
-		a.println("Previewing in the Canvas theme. Pass --theme DIR to use another theme.")
+		defer cleanup()
+		root = starter
+		a.println("Previewing in the starter theme. Pass --theme DIR to use another theme.")
 	}
 	apps := themekit.AppBlocks{
 		Load: func() ([]byte, error) {
@@ -161,7 +165,7 @@ func (a *app) appBlockPreview(ctx context.Context, args []string) error {
 		Page:  *page,
 		After: *after,
 	}
-	if err := themekit.ServeAppBlocks(ctx, root, bundle, apps, *host, *port, *preset, tools, a.stdout); err != nil {
+	if err := themekit.ServeAppBlocks(ctx, root, apps, *host, *port, *preset, a.tools(*checker, *renderer), a.stdout); err != nil {
 		return fmt.Errorf("app block preview failed: %w", err)
 	}
 	return nil

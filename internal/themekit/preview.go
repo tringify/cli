@@ -112,9 +112,6 @@ type Preview struct {
 	Tools    Tools
 	Out      io.Writer
 	Renderer string
-	// Bundle, when set, is a packaged theme previewed as it is, in place of
-	// building Root.
-	Bundle string
 	// Apps, when set, shows an app's blocks in the theme.
 	Apps *AppBlocks
 
@@ -181,16 +178,12 @@ func (p *Preview) Rebuild(ctx context.Context) bool {
 }
 
 func (p *Preview) rebuild(ctx context.Context) (bool, error) {
-	signature := ""
-	if p.Bundle == "" {
-		var err error
-		if signature, err = SourceSignature(p.Root); err != nil {
-			return false, err
-		}
+	signature, err := SourceSignature(p.Root)
+	if err != nil {
+		return false, err
 	}
 	var apps []byte
 	if p.Apps != nil {
-		var err error
 		if apps, err = p.Apps.Load(); err != nil {
 			p.signature = ""
 			return false, err
@@ -206,12 +199,9 @@ func (p *Preview) rebuild(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	defer os.RemoveAll(work)
-	bundle, output := p.Bundle, filepath.Join(work, "rendered")
-	if bundle == "" {
-		bundle = filepath.Join(work, "theme.zip")
-		if _, err := Package(ctx, p.Root, bundle, "sealed", p.Tools); err != nil {
-			return false, err
-		}
+	bundle, output := filepath.Join(work, "theme.zip"), filepath.Join(work, "rendered")
+	if _, err := Package(ctx, p.Root, bundle, "sealed", p.Tools); err != nil {
+		return false, err
 	}
 	args := []string{"--bundle", bundle, "--output", output, "--base", p.Base, "--preset", p.Preset}
 	if p.Apps != nil {
@@ -479,22 +469,14 @@ func Serve(ctx context.Context, root, host string, port int, preset string, tool
 	})
 }
 
-// ServeAppBlocks serves a preview of an app's blocks inside a theme: the
-// theme at root, or the packaged theme bundle when root is empty. It
-// rebuilds when the theme, the configuration or a block source changes.
-func ServeAppBlocks(ctx context.Context, root, bundle string, apps AppBlocks, host string, port int, preset string, tools Tools, out io.Writer) error {
+// ServeAppBlocks serves a preview of an app's blocks inside the theme at
+// root. It rebuilds when the theme, the configuration or a block source
+// changes.
+func ServeAppBlocks(ctx context.Context, root string, apps AppBlocks, host string, port int, preset string, tools Tools, out io.Writer) error {
 	return serve(ctx, host, port, tools, out, "Local sample preview of your app blocks, rendered as a store renders them. Shopper actions are disabled. Press Ctrl+C to stop.", func(temp, base, renderer string) (*Preview, error) {
-		var preview *Preview
-		if root != "" {
-			var err error
-			if preview, err = NewPreview(root, temp, base, renderer, preset, tools, out); err != nil {
-				return nil, err
-			}
-		} else {
-			preview = &Preview{
-				Temp: temp, Base: base, Renderer: renderer, Preset: preset, Tools: tools, Out: out, Bundle: bundle,
-				snapshot: map[string]asset{}, name: pyjson.String(filepath.Base(bundle)), pages: []pyjson.Value{},
-			}
+		preview, err := NewPreview(root, temp, base, renderer, preset, tools, out)
+		if err != nil {
+			return nil, err
 		}
 		preview.Apps = &apps
 		return preview, nil
