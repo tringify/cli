@@ -53,6 +53,7 @@ Themes:
 Apps:
   app list              List your organization's apps
   app create            Create an app
+  app categories        List the category and subcategory IDs for app create
   app init              Create a project for an app from the app starter
   app config pull       Write the app's configuration to tringify.app.json
   app config push       Replace the app's draft configuration with tringify.app.json

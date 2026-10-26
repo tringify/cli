@@ -29,6 +29,8 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 		return a.appList(ctx, args[1:])
 	case "create":
 		return a.appCreate(ctx, args[1:])
+	case "categories":
+		return a.appCategories(ctx, args[1:])
 	case "init":
 		return a.appInit(ctx, args[1:])
 	case "config":
@@ -702,12 +704,12 @@ func (a *app) appInstallLink(ctx context.Context, args []string) error {
 // command's output; nothing can read it again later.
 func (a *app) appCreate(ctx context.Context, args []string) error {
 	fs := newFlags("app create --name NAME --type standard|sales_channel --distribution private|marketplace [--category ID --subcategory ID] [--json]",
-		"Create an app in your organization. Sales channel apps need a category and subcategory; the subcategory sets the channel type. Run `tringify app init --app ID` next to start a project for it.")
+		"Create an app in your organization. Sales channel apps need a category and subcategory (list them with `tringify app categories`); the subcategory sets the channel type. Run `tringify app init --app ID` next to start a project for it.")
 	name := fs.String("name", "", "app name")
 	appType := fs.String("type", "", "standard or sales_channel")
 	distribution := fs.String("distribution", "", "private (install links) or marketplace (App Store listing)")
-	category := fs.String("category", "", "category ID, for example sales_channels")
-	subcategory := fs.String("subcategory", "", "subcategory ID")
+	category := fs.String("category", "", "category ID (see `tringify app categories`)")
+	subcategory := fs.String("subcategory", "", "subcategory ID (see `tringify app categories`)")
 	description := fs.String("description", "", "short description")
 	asJSON := fs.Bool("json", false, "print the result as JSON, for scripts and piping into a secret store")
 	if _, err := parse(fs, args); err != nil {
