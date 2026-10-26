@@ -19,9 +19,11 @@ import (
 // sampleUploadBatch is how many demo images go in one upload request.
 const sampleUploadBatch = 10
 
-// addSampleContent uploads the theme's demo images to the store's files and
-// asks the store to add the demo catalog as products. The store does this in
-// the background, on development stores only, skipping products it has.
+// addSampleContent adds the theme's demo catalog to a development store.
+// It first asks the store for a plan (plan_sample_content), which refuses any
+// store that is not a development store before anything is uploaded; then it
+// uploads only the demo images the plan lists and asks the store to add the
+// products and collections in the background, skipping ones it already has.
 func (a *app) addSampleContent(ctx context.Context, t *storeTarget, root string) error {
 	raw, err := os.ReadFile(filepath.Join(root, "demo", "catalog.json"))
 	if errors.Is(err, os.ErrNotExist) {
