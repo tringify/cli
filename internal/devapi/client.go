@@ -29,6 +29,11 @@ func New(base, organizationID string, tokens mcp.TokenSource, version string) *C
 	return &Client{Base: base, OrganizationID: organizationID, Tokens: tokens, HTTP: &http.Client{Timeout: 2 * time.Minute}, Version: version}
 }
 
+// Public calls the Developer API's public endpoints, which need no sign-in.
+func Public(base, version string) *Client {
+	return &Client{Base: base, HTTP: &http.Client{Timeout: 2 * time.Minute}, Version: version}
+}
+
 // Error is an error returned by the API.
 type Error struct {
 	Status  int
@@ -87,22 +92,23 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, out any)
 // refreshed token on 401, and hands a successful (2xx) response to read.
 func (c *Client) send(ctx context.Context, method, path string, payload []byte, accept string, read func(*http.Response) error) error {
 	for attempt := 0; attempt < 2; attempt++ {
-		var token string
-		var err error
-		if attempt == 0 {
-			token, err = c.Tokens.AccessToken(ctx)
-		} else {
-			token, err = c.Tokens.ForceRefresh(ctx)
-		}
-		if err != nil {
-			return err
-		}
 		req, err := http.NewRequestWithContext(ctx, method, c.Base+"/api/v1"+path, bytes.NewReader(payload))
 		if err != nil {
 			return err
 		}
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("X-Organization-ID", c.OrganizationID)
+		if c.Tokens != nil {
+			var token string
+			if attempt == 0 {
+				token, err = c.Tokens.AccessToken(ctx)
+			} else {
+				token, err = c.Tokens.ForceRefresh(ctx)
+			}
+			if err != nil {
+				return err
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("X-Organization-ID", c.OrganizationID)
+		}
 		req.Header.Set("Accept", accept)
 		req.Header.Set("User-Agent", "tringify-cli/"+c.Version)
 		if payload != nil {
@@ -112,7 +118,7 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte, 
 		if err != nil {
 			return err
 		}
-		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 {
+		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 && c.Tokens != nil {
 			resp.Body.Close()
 			continue
 		}

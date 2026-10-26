@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+
+	"github.com/tringify/cli/internal/devapi"
 )
 
 // appCategories lists the categories and subcategories an app can be created
 // in, from the same API the Developer Portal's create page reads. Tringify's
-// own channels (channel_is_internal) are left out: the API refuses them.
+// own channels (channel_is_internal) are left out: the API refuses them. The
+// list is public, so this works without signing in.
 func (a *app) appCategories(ctx context.Context, args []string) error {
 	fs := newFlags("app categories [--type standard|sales_channel] [--json]",
 		"List the category and subcategory IDs to pass to `tringify app create`. A sales channel app's subcategory sets its channel type.")
@@ -19,10 +22,7 @@ func (a *app) appCategories(ctx context.Context, args []string) error {
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
-	api, _, err := a.devAPI()
-	if err != nil {
-		return err
-	}
+	api := devapi.Public(a.devAPIBase, version)
 	type category struct {
 		ID           string `json:"id"`
 		Name         string `json:"name"`
@@ -42,7 +42,7 @@ func (a *app) appCategories(ctx context.Context, args []string) error {
 		Subcategories []subcategory `json:"subcategories"`
 	}
 	if err := api.Do(ctx, http.MethodGet, "/apps/categories", nil, &data); err != nil {
-		return appAccess(err)
+		return err
 	}
 	subs := map[string][]subcategory{}
 	for _, s := range data.Subcategories {
