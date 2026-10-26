@@ -750,13 +750,23 @@ func (a *app) appWebhookTest(ctx context.Context, args []string) error {
 }
 
 func (a *app) appDeliveries(ctx context.Context, args []string) error {
-	fs := newFlags("app deliveries [--status failed]", "List recent webhook deliveries to the app, newest first.")
+	fs := newFlags("app deliveries [--data] [--status failed] [--store STORE] [--delivery ID] [--event ID] [--cursor CURSOR]",
+		"List webhook deliveries to the app in every region, newest first: lifecycle deliveries, or with --data store data deliveries. A region that does not answer is named on stderr; its deliveries are missing from the list.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
-	status := fs.String("status", "", "only deliveries with this status, such as failed or delivered")
-	limit := fs.Int("limit", 20, "how many to list (at most 100)")
+	data := fs.Bool("data", false, "list store data deliveries instead of lifecycle deliveries")
+	status := fs.String("status", "", "only deliveries with this status, such as failed, retrying or delivered")
+	event := fs.String("event-type", "", "only deliveries of this event type")
+	store := fs.String("store", "", "only deliveries to this store: its ID, its domain, or part of its name")
+	delivery := fs.String("delivery", "", "only the delivery with this ID")
+	eventID := fs.String("event", "", "data deliveries: only deliveries of the event with this ID")
+	cursor := fs.String("cursor", "", "continue a list where the previous page ended (printed after a page)")
+	limit := fs.Int("limit", 20, "how many to list per page (at most 100)")
 	if _, err := parse(fs, args); err != nil {
 		return err
+	}
+	if *eventID != "" && !*data {
+		return errors.New("--event filters data deliveries; add --data")
 	}
 	appID, err := appTarget(*appFlag, *file)
 	if err != nil {
@@ -766,30 +776,43 @@ func (a *app) appDeliveries(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	query := url.Values{"limit": {strconv.Itoa(min(max(*limit, 1), 100))}}
-	if *status != "" {
-		query.Set("status", *status)
+	query := url.Values{"limit": {strconv.Itoa(*limit)}}
+	for key, value := range map[string]string{"status": *status, "event_type": *event, "store": *store, "delivery_id": *delivery, "event_id": *eventID, "cursor": *cursor} {
+		if value != "" {
+			query.Set(key, value)
+		}
 	}
-	var data struct {
-		Deliveries []struct {
+	path := "/webhooks/deliveries"
+	if *data {
+		path = "/webhooks/data-deliveries"
+	}
+	var page struct {
+		Items []struct {
 			DeliveryID   string    `json:"delivery_id"`
+			StoreID      string    `json:"store_id"`
+			StoreName    string    `json:"store_name"`
 			EventType    string    `json:"event_type"`
-			Status       string    `json:"status"`
+			StatusLabel  string    `json:"status_label"`
 			Attempts     int       `json:"attempts"`
 			ResponseCode *int      `json:"last_response_code"`
 			LastError    *string   `json:"last_error"`
 			CreatedAt    time.Time `json:"created_at"`
-		} `json:"deliveries"`
-		Total int `json:"total"`
+			Region       region    `json:"region"`
+		} `json:"items"`
+		NextCursor         string   `json:"next_cursor"`
+		UnavailableRegions []region `json:"unavailable_regions"`
 	}
-	if err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID)+"/webhooks/deliveries?"+query.Encode(), nil, &data); err != nil {
+	if err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID)+path+"?"+query.Encode(), nil, &page); err != nil {
 		return appAccess(err)
 	}
-	if len(data.Deliveries) == 0 {
+	for _, r := range page.UnavailableRegions {
+		fmt.Fprintf(a.stderr, "Results from %s are unavailable right now; they're missing from this list.\n", r.Name)
+	}
+	if len(page.Items) == 0 {
 		a.println("No webhook deliveries.")
 		return nil
 	}
-	for _, d := range data.Deliveries {
+	for _, d := range page.Items {
 		var answer bytes.Buffer
 		if d.ResponseCode != nil {
 			fmt.Fprintf(&answer, "HTTP %d", *d.ResponseCode)
@@ -800,10 +823,15 @@ func (a *app) appDeliveries(ctx context.Context, args []string) error {
 			}
 			answer.WriteString(*d.LastError)
 		}
-		a.printf("%s  %-28s %-10s %d attempt(s)  %s\n", d.CreatedAt.UTC().Format("2006-01-02 15:04 UTC"), d.EventType, d.Status, d.Attempts, answer.String())
+		store := d.StoreName
+		if store == "" {
+			store = d.StoreID
+		}
+		a.printf("%s  %s  %-28s %-10s %d attempt(s)  %s (%s)  %s\n", d.CreatedAt.UTC().Format("2006-01-02 15:04 UTC"), d.DeliveryID,
+			d.EventType, d.StatusLabel, d.Attempts, store, d.Region.Name, answer.String())
 	}
-	if data.Total > len(data.Deliveries) {
-		a.printf("Showing %d of %d.\n", len(data.Deliveries), data.Total)
+	if page.NextCursor != "" {
+		a.printf("More deliveries: add --cursor %s\n", page.NextCursor)
 	}
 	return nil
 }
