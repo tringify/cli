@@ -71,6 +71,8 @@ Apps:
   app webhook finish-rotation Stop signing requests with the previous webhook signing secret now
   app secret rotate     Issue a new client secret
   app deliveries        List recent webhook deliveries
+  app retire            Check whether the app can be retired, then confirm in the Developer Portal
+  app delete            Check whether the app can be deleted (never used only), then confirm in the Developer Portal
 
 Development stores:
   store list            List your organization's development stores
@@ -110,17 +112,21 @@ type app struct {
 	stdout, stderr io.Writer
 	apiBase        string
 	devAPIBase     string
+	portalBase     string // the Developer Portal, where dangerous actions are confirmed
 	resolver       *themetools.Resolver
 	uploadHTTP     *http.Client // signed-URL uploads; nil means a 2-minute default
 }
 
 func newApp(stdout, stderr io.Writer) *app {
-	a := &app{stdin: os.Stdin, stdout: stdout, stderr: stderr, apiBase: "https://api.tringify.com", devAPIBase: "https://api-dev.tringify.com"}
+	a := &app{stdin: os.Stdin, stdout: stdout, stderr: stderr, apiBase: "https://api.tringify.com", devAPIBase: "https://api-dev.tringify.com", portalBase: "https://dev.tringify.com"}
 	if v := os.Getenv("TRINGIFY_API_BASE"); v != "" {
 		a.apiBase = strings.TrimRight(v, "/")
 	}
 	if v := os.Getenv("TRINGIFY_DEVELOPER_API_BASE"); v != "" {
 		a.devAPIBase = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("TRINGIFY_DEVELOPER_PORTAL_BASE"); v != "" {
+		a.portalBase = strings.TrimRight(v, "/")
 	}
 	return a
 }

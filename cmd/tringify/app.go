@@ -74,16 +74,21 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 		return errors.New("usage: tringify app secret rotate")
 	case "deliveries":
 		return a.appDeliveries(ctx, args[1:])
+	case "retire":
+		return a.appRetire(ctx, args[1:])
+	case "delete":
+		return a.appDelete(ctx, args[1:])
 	}
 	return fmt.Errorf("unknown app command %q", args[0])
 }
 
-// appAccess explains a refusal from a login made before app access was part
-// of the sign-in.
+// appAccess explains a refusal from a login made before the command's access
+// was part of the sign-in: a missing scope is refused as PERMISSION_DENIED,
+// like a role without the permission.
 func appAccess(err error) error {
 	var apiErr *devapi.Error
-	if errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden && apiErr.Code == "FORBIDDEN" {
-		return fmt.Errorf("%w. If you signed in before app commands existed, run `tringify login` again", err)
+	if errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden && (apiErr.Code == "FORBIDDEN" || apiErr.Code == "PERMISSION_DENIED") {
+		return fmt.Errorf("%w. If you signed in before this command was added, run `tringify login` again to grant its access", err)
 	}
 	return err
 }
