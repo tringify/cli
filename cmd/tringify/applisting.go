@@ -65,6 +65,21 @@ func (a *app) appListingShow(ctx context.Context, args []string) error {
 	if desc := str(current["description"]); desc != "" {
 		a.printf("\n%s\n", desc)
 	}
+	// Marketplace apps: what the submit gate still needs, in its words.
+	requirements, _ := current["listing_requirements"].([]any)
+	var missing []string
+	for _, raw := range requirements {
+		requirement, _ := raw.(map[string]any)
+		if done, _ := requirement["done"].(bool); !done {
+			missing = append(missing, str(requirement["message"]))
+		}
+	}
+	if len(missing) > 0 {
+		a.println("\nBefore you can submit this listing for review:")
+		for _, message := range missing {
+			a.printf("  - %s\n", message)
+		}
+	}
 	return nil
 }
 
