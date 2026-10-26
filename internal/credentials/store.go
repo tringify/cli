@@ -1,10 +1,9 @@
 // Package credentials keeps OAuth tokens for signed-in accounts.
 //
-// Tokens go to the operating system's credential store (macOS Keychain,
-// Windows Credential Manager, or the Secret Service on Linux) when one is
-// available. Otherwise they are written to a file readable only by the
-// current user. Non-secret account details (which store or organization a
-// login belongs to) live in a separate index file.
+// Tokens go only to the operating system's credential store (macOS Keychain,
+// Windows Credential Manager, or the Secret Service on Linux). Non-secret
+// account details (which store or organization a login belongs to) live in a
+// separate index file.
 package credentials
 
 import (
@@ -78,8 +77,8 @@ func Open() (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	if !keyringWorks() {
-		return nil, errors.New("no system keychain is available. The Tringify CLI keeps logins in the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux (such as GNOME Keyring or KWallet); start one and try again")
+	if err := keyringWorks(); err != nil {
+		return nil, err
 	}
 	return &Store{dir: dir, backend: keyringBackend{}}, nil
 }
@@ -100,11 +99,53 @@ func ConfigDir() (string, error) {
 // Backend names where secrets are kept, for messages.
 func (s *Store) Backend() string { return s.backend.name() }
 
-func keyringWorks() bool {
+func keyringWorks() error {
 	// A lookup of an absent item succeeds with ErrNotFound only when a
 	// credential store is actually reachable.
-	_, err := keyring.Get(keyringService, "availability-check")
-	return err == nil || errors.Is(err, keyring.ErrNotFound)
+	err := keychainCall(func() error {
+		_, err := keyring.Get(keyringService, "availability-check")
+		return err
+	})
+	switch {
+	case err == nil, errors.Is(err, keyring.ErrNotFound):
+		return nil
+	case errors.Is(err, errKeychainTimeout):
+		return err
+	}
+	return errors.New("no system keychain is available. The Tringify CLI keeps logins in the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux (such as GNOME Keyring or KWallet); start one and try again")
+}
+
+const (
+	// keychainNotice is how long a keychain call runs before the CLI says it
+	// is waiting: the keychain may be showing an unlock or access prompt.
+	keychainNotice = 3 * time.Second
+	// keychainTimeout bounds every keychain call. A credential store that
+	// is installed but not answering (a Secret Service with no session to
+	// show its unlock prompt, for example) would otherwise block forever.
+	keychainTimeout = 2 * time.Minute
+)
+
+var errKeychainTimeout = fmt.Errorf("the system keychain did not answer within %s. If it is locked, unlock it and try again. Over SSH or in a session without a desktop, the keychain cannot show its unlock prompt: unlock it from a desktop session first (on Linux, for example with gnome-keyring-daemon --unlock)", keychainTimeout)
+
+// keychainCall runs one keychain operation, saying on standard error when it
+// is waiting for the keychain and failing once keychainTimeout passes.
+func keychainCall(fn func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	notice := time.NewTimer(keychainNotice)
+	defer notice.Stop()
+	timeout := time.NewTimer(keychainTimeout)
+	defer timeout.Stop()
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-notice.C:
+			fmt.Fprintln(os.Stderr, "Waiting for the system keychain. If it asks you to unlock it or allow access, do so.")
+		case <-timeout.C:
+			return errKeychainTimeout
+		}
+	}
 }
 
 // Save stores the account's tokens in the backend and its details in the index.
@@ -250,15 +291,25 @@ type keyringBackend struct{}
 
 func (keyringBackend) name() string { return "the system keychain" }
 func (keyringBackend) get(key string) (string, error) {
-	v, err := keyring.Get(keyringService, key)
+	value := make(chan string, 1)
+	err := keychainCall(func() error {
+		v, err := keyring.Get(keyringService, key)
+		value <- v
+		return err
+	})
 	if errors.Is(err, keyring.ErrNotFound) {
 		return "", errNotFound
 	}
-	return v, err
+	if err != nil {
+		return "", err
+	}
+	return <-value, nil
 }
-func (keyringBackend) set(key, value string) error { return keyring.Set(keyringService, key, value) }
+func (keyringBackend) set(key, value string) error {
+	return keychainCall(func() error { return keyring.Set(keyringService, key, value) })
+}
 func (keyringBackend) delete(key string) error {
-	err := keyring.Delete(keyringService, key)
+	err := keychainCall(func() error { return keyring.Delete(keyringService, key) })
 	if errors.Is(err, keyring.ErrNotFound) {
 		return errNotFound
 	}
