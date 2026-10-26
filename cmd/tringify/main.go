@@ -52,7 +52,7 @@ Themes:
 
 Apps:
   app list              List your organization's apps
-  app create            Create an app
+  app create            Create an app (choose its handle with --handle)
   app categories        List the category and subcategory IDs for app create
   app init              Create a project for an app from the app starter
   app config pull       Write the app's configuration to tringify.app.json
