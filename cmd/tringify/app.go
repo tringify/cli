@@ -355,7 +355,7 @@ func (a *app) appRelease(ctx context.Context, args []string) error {
 	notes := fs.String("notes", "", "release notes shown to stores")
 	var stores stringList
 	fs.Var(&stores, "store", "private apps: an installed store to update, by ID or domain (repeatable)")
-	all := fs.Bool("all", false, "private apps: update every installed store")
+	all := fs.Bool("all", false, "private apps: update every installed store, in every region, that does not have the draft yet (each region picks its own stores)")
 	yes := fs.Bool("yes", false, "private apps: send without asking")
 	renderer := fs.String("renderer", "", rendererHelp)
 	if _, err := parse(fs, args); err != nil {
@@ -422,27 +422,44 @@ func (a *app) appRelease(ctx context.Context, args []string) error {
 	return nil
 }
 
+type region struct {
+	Stamp string `json:"stamp"`
+	Name  string `json:"name"`
+}
+
+// printUnavailable names the regions whose stores a merged answer is missing.
+func (a *app) printUnavailable(regions []region) {
+	for _, r := range regions {
+		a.printf("Results from %s are unavailable right now; its stores are not included.\n", r.Name)
+	}
+}
+
 type privateUpdatePreview struct {
 	Limits struct {
-		MaxStores int `json:"max_stores"`
+		MaxStores    int `json:"max_stores"`
+		ListPageSize int `json:"list_page_size"`
+		ListMaxLimit int `json:"list_max_limit"`
 	} `json:"limits"`
-	SnapshotSHA256 string `json:"snapshot_sha256"`
-	Installations  []struct {
-		StoreID          string   `json:"store_id"`
-		StoreName        string   `json:"store_name"`
-		StoreDomains     []string `json:"store_domains"`
-		InstalledVersion string   `json:"installed_version"`
-		SnapshotSHA256   string   `json:"snapshot_sha256"`
-		PendingVersion   string   `json:"pending_version"`
-		PendingSHA256    string   `json:"pending_sha256"`
-	} `json:"installations"`
-	Versions []struct {
-		Version    string `json:"version"`
-		Notes      string `json:"release_notes"`
-		Pending    int    `json:"pending"`
-		Accepted   int    `json:"accepted"`
-		Superseded int    `json:"superseded"`
-	} `json:"versions"`
+	SnapshotSHA256     string   `json:"snapshot_sha256"`
+	Installed          int      `json:"installed"`
+	OutOfDate          int      `json:"out_of_date"`
+	UnavailableRegions []region `json:"unavailable_regions"`
+}
+
+type privateUpdateInstallation struct {
+	StoreID          string   `json:"store_id"`
+	StoreName        string   `json:"store_name"`
+	StoreDomains     []string `json:"store_domains"`
+	InstalledVersion string   `json:"installed_version"`
+	SnapshotSHA256   string   `json:"snapshot_sha256"`
+	PendingSHA256    string   `json:"pending_sha256"`
+	Region           region   `json:"region"`
+}
+
+type privateUpdateInstallations struct {
+	Items              []privateUpdateInstallation `json:"items"`
+	NextCursor         string                      `json:"next_cursor"`
+	UnavailableRegions []region                    `json:"unavailable_regions"`
 }
 
 func (a *app) privateUpdates(ctx context.Context, api *devapi.Client, appID string) (privateUpdatePreview, error) {
@@ -451,51 +468,100 @@ func (a *app) privateUpdates(ctx context.Context, api *devapi.Client, appID stri
 	return preview, appAccess(err)
 }
 
+func (a *app) privateUpdateInstallations(ctx context.Context, api *devapi.Client, appID, store string, limit int) (privateUpdateInstallations, error) {
+	var page privateUpdateInstallations
+	q := url.Values{"limit": {fmt.Sprint(limit)}}
+	if store != "" {
+		q.Set("store", store)
+	}
+	err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID)+"/private-updates/installations?"+q.Encode(), nil, &page)
+	return page, appAccess(err)
+}
+
+// resolveStore finds the installation --store names: a store ID or any of
+// the store's domains, matched exactly (the server matches the text).
+func (a *app) resolveStore(ctx context.Context, api *devapi.Client, appID, store string, preview privateUpdatePreview) (privateUpdateInstallation, error) {
+	want := strings.ToLower(strings.TrimSpace(store))
+	page, err := a.privateUpdateInstallations(ctx, api, appID, want, preview.Limits.ListMaxLimit)
+	if err != nil {
+		return privateUpdateInstallation{}, err
+	}
+	a.printUnavailable(page.UnavailableRegions)
+	for _, install := range page.Items {
+		if strings.EqualFold(install.StoreID, want) {
+			return install, nil
+		}
+		for _, domain := range install.StoreDomains {
+			if strings.EqualFold(domain, want) {
+				return install, nil
+			}
+		}
+	}
+	return privateUpdateInstallation{}, fmt.Errorf("no store with ID or domain %s has installed the app. Run `tringify app release` without --store to list the installed stores", store)
+}
+
+type privateUpdateSent struct {
+	Release struct {
+		Version string `json:"version"`
+	} `json:"release"`
+	Offered int `json:"offered"`
+	Regions []struct {
+		Name    string `json:"name"`
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	} `json:"regions"`
+	NextCursor string `json:"next_cursor"`
+}
+
 func (a *app) sendPrivateUpdate(ctx context.Context, api *devapi.Client, appID string, stores []string, all bool, notes string, yes bool) error {
 	preview, err := a.privateUpdates(ctx, api, appID)
 	if err != nil {
 		return err
 	}
-	if len(preview.Installations) == 0 {
+	a.printUnavailable(preview.UnavailableRegions)
+	if preview.Installed == 0 && len(preview.UnavailableRegions) == 0 {
 		return errors.New("no store has installed the app yet. Create an install link with `tringify app install-link`")
 	}
-	// --store takes a store ID or any of the store's domains.
-	storeIDs := map[string]string{}
-	var targets []string
-	for _, install := range preview.Installations {
-		storeIDs[strings.ToLower(install.StoreID)] = install.StoreID
-		for _, domain := range install.StoreDomains {
-			storeIDs[strings.ToLower(domain)] = install.StoreID
-		}
-		current := install.SnapshotSHA256 == preview.SnapshotSHA256 || install.PendingSHA256 == preview.SnapshotSHA256
-		if all && !current {
-			targets = append(targets, install.StoreID)
-		}
-	}
-	for _, store := range stores {
-		id, ok := storeIDs[strings.ToLower(strings.TrimSpace(store))]
-		if !ok {
-			return fmt.Errorf("no store with ID or domain %s has installed the app. Run `tringify app release` without --store to list the installed stores", store)
-		}
-		targets = append(targets, id)
-	}
 	if !all && len(stores) == 0 {
-		a.println("Installed stores:")
-		for _, install := range preview.Installations {
+		page, err := a.privateUpdateInstallations(ctx, api, appID, "", preview.Limits.ListPageSize)
+		if err != nil {
+			return err
+		}
+		a.printf("Installed stores (%d, %d not on the draft), newest first:\n", preview.Installed, preview.OutOfDate)
+		for _, install := range page.Items {
 			domain := ""
 			if len(install.StoreDomains) > 0 {
 				domain = install.StoreDomains[0]
 			}
-			a.printf("  %s  %s  %s  %s\n", install.StoreID, domain, install.StoreName, install.InstalledVersion)
+			a.printf("  %s  %s  %s  %s  %s\n", install.StoreID, domain, install.StoreName, install.InstalledVersion, install.Region.Name)
+		}
+		if page.NextCursor != "" {
+			a.println("  … and more. Find a store with --store ID or --store DOMAIN.")
 		}
 		return errors.New("name the stores to update with --store ID or --store DOMAIN, or use --all")
 	}
-	if len(targets) == 0 {
-		a.println("Every installed store already has this draft or has it waiting for approval.")
+	var targets []string
+	for _, store := range stores {
+		install, err := a.resolveStore(ctx, api, appID, store, preview)
+		if err != nil {
+			return err
+		}
+		if install.SnapshotSHA256 == preview.SnapshotSHA256 || install.PendingSHA256 == preview.SnapshotSHA256 {
+			a.printf("%s already has this draft or has it waiting for approval; skipped.\n", install.StoreName)
+			continue
+		}
+		targets = append(targets, install.StoreID)
+	}
+	count := len(targets)
+	if all {
+		count = preview.OutOfDate
+	}
+	if count == 0 {
+		a.println("Every named or installed store already has this draft or has it waiting for approval.")
 		return nil
 	}
 	if !yes {
-		ok, err := confirmWith(a.stdin, a.stdout, fmt.Sprintf("Send the draft to %d store(s)?", len(targets)), "Pass --yes to send without confirming")
+		ok, err := confirmWith(a.stdin, a.stdout, fmt.Sprintf("Send the draft to %d store(s)?", count), "Pass --yes to send without confirming")
 		if err != nil || !ok {
 			if err == nil {
 				a.println("Nothing sent.")
@@ -503,28 +569,61 @@ func (a *app) sendPrivateUpdate(ctx context.Context, api *devapi.Client, appID s
 			return err
 		}
 	}
-	// The API takes at most limits.max_stores stores a request. Every batch
-	// sends the same draft and notes, so all of them offer the same version.
-	batch := preview.Limits.MaxStores
-	if batch <= 0 {
-		return errors.New("the Developer API did not say how many stores one update request may name")
-	}
-	var version string
-	for start := 0; start < len(targets); start += batch {
-		end := min(start+batch, len(targets))
-		body := map[string]any{"snapshot_sha256": preview.SnapshotSHA256, "store_ids": targets[start:end], "release_notes": notes}
-		var sent struct {
-			Version string `json:"version"`
-		}
-		if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/private-updates", body, &sent); err != nil {
-			if start > 0 {
-				return fmt.Errorf("sent version %s to %d of %d store(s), then: %w. Run the command again to send it to the rest", version, start, len(targets), appAccess(err))
+	path := "/apps/" + url.PathEscape(appID) + "/private-updates"
+	failed := 0
+	send := func(body map[string]any) (privateUpdateSent, error) {
+		var sent privateUpdateSent
+		err := api.Do(ctx, http.MethodPost, path, body, &sent)
+		for _, r := range sent.Regions {
+			a.println(r.Message)
+			if r.Status == "failed" {
+				failed++
 			}
-			return appAccess(err)
 		}
-		version = sent.Version
+		return sent, appAccess(err)
 	}
-	a.printf("Sent version %s to %d store(s). Each store accepts the update in its admin.\n", version, len(targets))
+	offered, version := 0, ""
+	if all {
+		// Each region picks its own out-of-date stores; a send that has more
+		// to do returns next_cursor and the same request continues it.
+		cursor := ""
+		for {
+			sent, err := send(map[string]any{"snapshot_sha256": preview.SnapshotSHA256, "all": true, "cursor": cursor, "release_notes": notes})
+			if err != nil {
+				return err
+			}
+			offered, version = offered+sent.Offered, sent.Release.Version
+			if cursor = sent.NextCursor; cursor == "" {
+				break
+			}
+		}
+	} else {
+		// The API names at most limits.max_stores stores a request; every
+		// batch freezes the same draft and notes, so all offer one version.
+		batch := preview.Limits.MaxStores
+		if batch <= 0 {
+			return errors.New("the Developer API did not say how many stores one update request may name")
+		}
+		for start := 0; start < len(targets); start += batch {
+			end := min(start+batch, len(targets))
+			sent, err := send(map[string]any{"snapshot_sha256": preview.SnapshotSHA256, "store_ids": targets[start:end], "release_notes": notes})
+			if err != nil {
+				if offered > 0 {
+					return fmt.Errorf("sent version %s to %d store(s), then: %w. Run the command again to send it to the rest", version, offered, err)
+				}
+				return err
+			}
+			offered, version = offered+sent.Offered, sent.Release.Version
+		}
+	}
+	if offered > 0 {
+		a.printf("Sent version %s to %d store(s). Each store accepts the update in its admin.\n", version, offered)
+	} else {
+		a.println("Nothing sent.")
+	}
+	if failed > 0 {
+		return errors.New("the update did not reach every region (see above). Run the command again to send it to the rest")
+	}
 	return nil
 }
 
@@ -548,14 +647,24 @@ func (a *app) appVersions(ctx context.Context, args []string) error {
 		return err
 	}
 	if distribution == "private" {
-		preview, err := a.privateUpdates(ctx, api, appID)
-		if err != nil {
-			return err
+		var history struct {
+			Versions []struct {
+				Version    string `json:"version"`
+				Notes      string `json:"release_notes"`
+				Pending    int    `json:"pending"`
+				Accepted   int    `json:"accepted"`
+				Superseded int    `json:"superseded"`
+			} `json:"versions"`
+			UnavailableRegions []region `json:"unavailable_regions"`
 		}
-		if len(preview.Versions) == 0 {
+		if err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID)+"/private-updates/versions", nil, &history); err != nil {
+			return appAccess(err)
+		}
+		a.printUnavailable(history.UnavailableRegions)
+		if len(history.Versions) == 0 {
 			a.println("No updates sent yet. Stores that install from a link get the draft as it is then.")
 		}
-		for _, v := range preview.Versions {
+		for _, v := range history.Versions {
 			a.printf("%-10s %d accepted, %d waiting, %d replaced by a later version\n", v.Version, v.Accepted, v.Pending, v.Superseded)
 			if notes := strings.TrimSpace(v.Notes); notes != "" {
 				for _, line := range strings.Split(notes, "\n") {
