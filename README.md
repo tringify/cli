@@ -174,10 +174,10 @@ If you used the `tringify-theme` command from the theme tools, every one of its 
 
 | Login | Access requested |
 | --- | --- |
-| Developer organization | View and edit your organization's themes and apps, and list and create its development stores (`organization:themes:read`, `organization:themes:write`, `organization:apps:read`, `organization:apps:write`, `organization:dev_stores:read`, `organization:dev_stores:write`) |
+| Developer organization | View and edit your organization's themes and apps, release apps (submit, publish, private updates, install links), rotate app secrets, and list and create its development stores (`organization:themes:read`, `organization:themes:write`, `organization:apps:read`, `organization:apps:write`, `organization:apps:release`, `organization:apps:credentials`, `organization:dev_stores:read`, `organization:dev_stores:write`) |
 | Store | View and edit the store's storefront themes (`store:online_store.storefronts:read`, `store:online_store.storefronts:write`). With `theme dev --with-demo`, also add products and files (`store:products:write`, `store:files:write`). |
 
-The CLI never receives more access than your own role in that organization or store, and if your role changes, the CLI's access changes with it. It cannot change your live theme, delete stores or apps, create listings, change pricing, or read or regenerate an app's client secret. If you signed in before app or development store access was added, run `tringify login` again to use `app` or `store` commands.
+The CLI never receives more access than your own role in that organization or store, and if your role changes, the CLI's access changes with it. Each app action needs the matching permission in your organization: editing needs Edit Apps, releasing needs Release Apps and rotating a secret needs Rotate App Credentials. It cannot change your live theme, delete stores or apps, create listings, change pricing, or read an app's existing client secret. If you signed in before app or development store access was added, run `tringify login` again to use `app` or `store` commands.
 
 Sign-in uses OAuth with PKCE and a one-time listener on `127.0.0.1`, so your password never passes through the CLI. Access tokens last 15 minutes and are refreshed automatically; refresh tokens rotate on every use. Tokens are kept only in your system keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux (GNOME Keyring, KWallet). Without one, sign-in stops and says so.
 
