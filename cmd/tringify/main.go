@@ -69,7 +69,8 @@ Apps:
   app webhook test      Send a test webhook to the app's webhook URL
   app webhook rotate-key Issue a new webhook signing secret; requests are also signed with the previous one for 72 hours
   app webhook finish-rotation Stop signing requests with the previous webhook signing secret now
-  app secret rotate     Issue a new client secret
+  app secret rotate     Issue a new client secret; the previous one keeps working for 72 hours
+  app secret finish-rotation Stop accepting the previous client secret now
   app deliveries        List recent webhook deliveries
   app retire            Check whether the app can be retired, then confirm in the Developer Portal
   app delete            Check whether the app can be deleted (never used only), then confirm in the Developer Portal

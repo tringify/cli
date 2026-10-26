@@ -68,10 +68,15 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 		}
 		return errors.New("usage: tringify app webhook test|rotate-key|finish-rotation")
 	case "secret":
-		if len(args) > 1 && args[1] == "rotate" {
-			return a.appSecretRotate(ctx, args[2:])
+		if len(args) > 1 {
+			switch args[1] {
+			case "rotate":
+				return a.appSecretRotate(ctx, args[2:])
+			case "finish-rotation":
+				return a.appSecretFinishRotation(ctx, args[2:])
+			}
 		}
-		return errors.New("usage: tringify app secret rotate")
+		return errors.New("usage: tringify app secret rotate|finish-rotation")
 	case "deliveries":
 		return a.appDeliveries(ctx, args[1:])
 	case "retire":
@@ -850,10 +855,11 @@ func (a *app) createApp(ctx context.Context, api *devapi.Client, body map[string
 	return nil
 }
 
-// appSecretRotate issues a new client secret. The previous one stops
-// working at once, so update the app's secret right after.
+// appSecretRotate issues a new client secret. For 72 hours the previous one
+// keeps working, so the app keeps exchanging codes while the new one is
+// deployed.
 func (a *app) appSecretRotate(ctx context.Context, args []string) error {
-	fs := newFlags("app secret rotate [--pipe-to COMMAND | --json]", "Issue a new client secret. The previous secret stops working immediately, so update your app right after. The new secret is shown only in this command's output, or, with --pipe-to, handed to your secret store without being shown.")
+	fs := newFlags("app secret rotate [--pipe-to COMMAND | --json]", "Issue a new client secret. For 72 hours the previous secret keeps working too, so your app keeps exchanging codes while you deploy the new one; the output says exactly when the previous secret stops working. Rotating again during that time stops the oldest secret at once. Run `tringify app secret finish-rotation` once the new secret is deployed, or right away if the previous secret was exposed. The new secret is shown only in this command's output, or, with --pipe-to, handed to your secret store without being shown.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	asJSON := fs.Bool("json", false, "print the result as JSON, for scripts and piping into a secret store")
@@ -878,6 +884,8 @@ func (a *app) appSecretRotate(ctx context.Context, args []string) error {
 func (a *app) rotateClientSecret(ctx context.Context, api *devapi.Client, appID string, asJSON bool, pipeTo string) error {
 	var rotated struct {
 		ClientSecret string `json:"client_secret"`
+		// Absent when the app had no secret before, so there is no overlap.
+		PreviousSecretExpiresAt *time.Time `json:"previous_secret_expires_at"`
 	}
 	if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/regenerate-secret", nil, &rotated); err != nil {
 		return appAccess(err)
@@ -886,14 +894,83 @@ func (a *app) rotateClientSecret(ctx context.Context, api *devapi.Client, appID 
 	if secret == "" {
 		return errors.New("the API did not return the new client secret")
 	}
+	expires := rotated.PreviousSecretExpiresAt
 	if pipeTo != "" {
-		return a.storeSecret(ctx, "client secret", secret, pipeTo, "The previous client secret no longer works and the new one was not shown; run this command again to issue another")
+		afterFailure := "The new one was not shown; run this command again to issue another"
+		if expires != nil {
+			afterFailure = fmt.Sprintf("The new one was not shown. Until %s, the client secret that was current before this command ran keeps working; if that secret came from an earlier rotation you never deployed, your app is not using it. Running this command again stops it at once, so do it only when you can deploy the next secret right away", formatExpiry(*expires))
+		}
+		if err := a.storeSecret(ctx, "client secret", secret, pipeTo, afterFailure); err != nil {
+			return err
+		}
+		a.printSecretOverlap(expires)
+		return nil
 	}
 	if asJSON {
-		return json.NewEncoder(a.stdout).Encode(map[string]string{"app_id": appID, "client_secret": secret})
+		return json.NewEncoder(a.stdout).Encode(map[string]any{"app_id": appID, "client_secret": secret, "previous_secret_expires_at": expires})
 	}
 	a.printf("Client secret:  %s\n\n", secret)
-	a.println("Store it now; it is shown only once. The previous client secret no longer works.")
+	a.println("Store it now; it is shown only once.")
+	a.printSecretOverlap(expires)
+	return nil
+}
+
+// printSecretOverlap says until when the previous client secret still works.
+func (a *app) printSecretOverlap(expires *time.Time) {
+	if expires == nil {
+		return
+	}
+	a.printf("Until %s, the previous client secret keeps working too. Once the new secret is deployed, run `tringify app secret finish-rotation` to stop it sooner.\n", formatExpiry(*expires))
+}
+
+// appSecretFinishRotation revokes the previous client secret before its 72
+// hours are up.
+func (a *app) appSecretFinishRotation(ctx context.Context, args []string) error {
+	fs := newFlags("app secret finish-rotation [--app ID] [--yes]", "Stop accepting the previous client secret now instead of when its 72 hours end. Run this once the new secret is deployed everywhere, or right away if the previous secret was exposed.")
+	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
+	file := fs.String("file", appconfig.FileName, "configuration file")
+	yes := fs.Bool("yes", false, "revoke without asking")
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	appID, err := appTarget(*appFlag, *file)
+	if err != nil {
+		return err
+	}
+	api, _, err := a.devAPI()
+	if err != nil {
+		return err
+	}
+	var details struct {
+		Rotation struct {
+			InProgress              bool       `json:"in_progress"`
+			PreviousSecretExpiresAt *time.Time `json:"previous_secret_expires_at"`
+		} `json:"client_secret_rotation"`
+	}
+	if err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID), nil, &details); err != nil {
+		return appAccess(err)
+	}
+	if !details.Rotation.InProgress {
+		a.println("No client secret rotation is in progress; only the current secret works.")
+		return nil
+	}
+	if !*yes {
+		question := "Stop accepting the previous client secret now?"
+		if details.Rotation.PreviousSecretExpiresAt != nil {
+			question = fmt.Sprintf("The previous client secret keeps working until %s. Stop accepting it now?", formatExpiry(*details.Rotation.PreviousSecretExpiresAt))
+		}
+		ok, err := confirmWith(a.stdin, a.stdout, question, "Pass --yes to revoke without confirming")
+		if err != nil || !ok {
+			if err == nil {
+				a.println("Previous secret not revoked.")
+			}
+			return err
+		}
+	}
+	if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/finish-secret-rotation", nil, nil); err != nil {
+		return appAccess(err)
+	}
+	a.println("Revoked the previous client secret. Only the current secret works now.")
 	return nil
 }
 
