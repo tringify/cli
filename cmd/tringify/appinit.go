@@ -31,7 +31,7 @@ var starterBlock string
 const starterBlockKey = "instalments"
 
 func (a *app) appInit(ctx context.Context, args []string) error {
-	flags := newFlags("app init --app ID [DIR]", "Create a project for an app from the Tringify app starter (github.com/tringify/app-starter): a TypeScript Cloudflare Worker with an embedded admin page, signed webhook handling and Store API calls. Writes the app's configuration to "+appconfig.FileName+", with app block sources in blocks/, and adds an example template block, blocks/instalments.vasc, that shows the product price split into payments. Create the app in the Developer Portal first.")
+	flags := newFlags("app init --app ID [DIR]", "Create a project for an app from the Tringify app starter (github.com/tringify/app-starter): a TypeScript Cloudflare Worker with an embedded admin page, signed webhook handling and Store API calls. Writes the app's configuration to "+appconfig.FileName+", with app block sources in blocks/, and adds an example template block, blocks/instalments.vasc, that shows the product price split into payments. Create the app first with `tringify app create` (or in the Developer Portal).")
 	appFlag := flags.String("app", "", "app ID (see `tringify app list`)")
 	positional, err := parse(flags, args)
 	if err != nil {
@@ -94,14 +94,14 @@ Next:
   npm run db:migrate:local
   npm run dev
 
-Before running it, copy two secrets from the Developer Portal into .dev.vars:
-  TRINGIFY_CLIENT_SECRET   Apps > %s > Credentials
-  TRINGIFY_WEBHOOK_SECRET  Apps > %s > Webhooks > Signing Key
-Each is shown when you create or regenerate it.
+Before running it, put two secrets in .dev.vars:
+  TRINGIFY_CLIENT_SECRET   printed once by `+"`tringify app create`"+`; for a new one run `+"`tringify app secret rotate`"+`
+  TRINGIFY_WEBHOOK_SECRET  run `+"`tringify app webhook rotate-key`"+` (or Developer Portal: Apps > %s > Webhooks > Signing Key)
+Both are shown only once; keep them out of version control.
 
 %s holds the app's configuration and blocks/ its app block sources.
 Edit them, then run `+"`tringify app config push`"+`. The README explains deploying the Worker.
-`, dest, details.Name, dir, details.Name, details.Name, appconfig.FileName)
+`, dest, details.Name, dir, details.Name, appconfig.FileName)
 	if added {
 		a.printf(`
 blocks/%s.vasc is an example template block: "or 3 interest-free payments

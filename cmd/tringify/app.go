@@ -752,6 +752,7 @@ func (a *app) createApp(ctx context.Context, api *devapi.Client, body map[string
 	a.printf("Client ID:      %s\n", created.Secrets.ClientID)
 	a.printf("Client secret:  %s\n\n", created.Secrets.ClientSecret)
 	a.println("Store the client secret now. It is shown only once; to issue a new one, run tringify app secret rotate.")
+	a.printf("\nNext: tringify app init --app %s [DIR]   (a project from the app starter)\n", created.App.ID)
 	return nil
 }
 
