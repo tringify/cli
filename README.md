@@ -2,6 +2,8 @@
 
 The `tringify` command builds and ships Tringify themes and apps from your terminal. For themes: create one from the starter, preview it with sample content, add it to a development store, and publish versions to your theme listing. For apps: start a project from the app starter, keep the app's configuration in `tringify.app.json`, and release versions.
 
+Full documentation: [dev-docs.tringify.com/cli](https://dev-docs.tringify.com/cli/).
+
 ## Install
 
 macOS and Linux:
@@ -51,7 +53,7 @@ tringify theme check                 # validate
 Work against a real store with your own products:
 
 ```sh
-tringify store create --name "Theme Lab" --country IN --currency INR
+tringify store create --name "Theme Lab" --country GB --currency GBP
 tringify theme dev --store STORE_ID  # syncs every saved change into an unpublished theme
 ```
 
@@ -64,7 +66,15 @@ tringify theme diff --listing LISTING_ID       # what changes compared with the 
 tringify theme publish --listing LISTING_ID --version 1.0.0 --notes "First release"
 ```
 
-Create the listing itself (name, category, pricing, support details) in the [Developer Portal](https://dev.tringify.com) under **Themes**.
+Create the listing first, with `tringify theme create` (a free listing) or in the [Developer Portal](https://dev.tringify.com) under **Themes**, describe it with `tringify theme update`, and send it for review with `tringify theme submit`:
+
+```sh
+tringify theme create --name "Aurora" --slug aurora --support-url https://example.com/help
+tringify theme categories
+tringify theme update --listing LISTING_ID --tagline "Bold, image-led layouts" --category CATEGORY \
+  --screenshot home.png --screenshot product.png
+tringify theme submit --listing LISTING_ID
+```
 
 ### Apps
 
@@ -87,7 +97,7 @@ tringify app publish 1.0.0                                   # once approved
 tringify app release --all --notes "New settings page"       # private
 ```
 
-`tringify.app.json` holds everything a release carries except the listing (name, descriptions, screenshots, pricing), which stays in the Developer Portal. Pushing replaces the whole draft: a field you delete from the file is cleared. Stores only see a change once you release a version and publish it.
+`tringify.app.json` holds everything a release carries except the listing (name, descriptions, icon, screenshots, support and policy links), which you change with `tringify app listing update` or in the Developer Portal; `tringify app listing show` shows it and what it still needs before a marketplace submit. Pushing replaces the whole draft: a field you delete from the file is cleared. Stores only see a change once you release a version and publish it.
 
 ### App blocks
 
@@ -140,6 +150,10 @@ tringify app block preview --theme ../my-theme --page collection
 | `store list` | Lists your organization's development stores and their IDs. |
 | `store create --name NAME --country CC --currency CUR` | Creates a development store and waits until it is ready. `--subdomain`, `--timezone` and `--billing-currency` are optional. |
 | `theme listings` | Lists your organization's theme listings and their IDs. |
+| `theme create --name NAME --slug SLUG [--support-url URL] [--terms-url URL]` | Creates a free theme listing in your organization and prints its ID. `--slug` is its URL name: lowercase letters, numbers and hyphens. |
+| `theme categories` | Lists the Theme Store categories, for `theme update --category`. |
+| `theme update --listing ID [--name N] [--tagline T] [--description D \| --description-file FILE] [--category SLUG] [--support-url URL] [--terms-url URL] [--screenshot FILE]... [--style-cover STYLE=FILE]...` | Changes a listing's text, category, links, screenshots and style covers; only the parts you pass change. Screenshots and covers are 1280×720 PNG, JPEG or WebP. Passing `--screenshot` replaces all screenshots, in the order given; passing `--style-cover` replaces all covers, where `STYLE` is the style preset name. |
+| `theme submit --listing ID` | Submits the listing for Theme Store review. |
 | `theme publish --listing ID --version X.Y.Z [--notes TEXT] [--breaking] [--install-store ID] [--yes] [DIR]` | Packages the theme, shows what changes compared with the newest published version, and publishes it as a new version of the listing once you confirm. Pass `--yes` to skip the question, for example in CI. |
 | `app list` | Lists your organization's apps and their IDs. |
 | `app create --name NAME [--handle HANDLE] --type standard\|sales_channel --distribution private\|marketplace [--category ID --subcategory ID] [--description TEXT] [--json]` | Creates an app and prints its app ID, handle, client ID and client secret. The handle is made from the name unless you choose it with `--handle`; it is checked before the app is created and cannot change later. The secret is shown only in this output; to issue a new one, run `app secret rotate`. Sales channel apps need a category and subcategory, which set the channel type. With `--json` the result is JSON, for scripts and piping into a secret store. |
@@ -151,18 +165,22 @@ tringify app block preview --theme ../my-theme --page collection
 | `app block context [--page PAGE] [--theme DIR] [--entity HANDLE]` | Prints the sample data each block that lists the page receives: the page's data cut to the block's `ctx_needs`. Uses the built-in sample catalog, or a theme's demo content with `--theme`. |
 | `app block preview [--theme DIR] [--page PAGE] [--after TYPE] [--port 9292]` | Serves a local preview of the theme (default: the [starter theme](https://github.com/tringify/theme-starter), downloaded as `theme init` does) with the app's blocks that list the page in its app block slot, after the theme block of type `--after` (default `price`). Blocks render as on a store: their mode's data only, the app markup policy, the page's app block budget and the `tf-ab-*` styles. Rebuilds when `tringify.app.json`, a block source or the theme changes. |
 | `app install-link [--store DOMAIN] [--draft] [--expires CHOICE] [--uses N]` | Prints a link that installs the app on a store. A private app installs its current draft; a marketplace app installs its published version, or with `--draft` its draft (development and transfer stores of your organization only). The expiry choices and the defaults for both flags come from the Developer API, the same as in the Developer Portal; an unknown `--expires` lists the choices. |
-| `app release [--bump patch\|minor\|major] [--store ID\|DOMAIN]... [--all] [--notes TEXT]` | Releases the draft. A marketplace app submits it as a new version (`--bump`): the listing needs an icon, at least one screenshot, a privacy policy URL and a support email or URL (`app listing show` lists what is missing), and a version identical to the published one is refused, since a version is only for configuration or listing changes (code changes go live when you deploy your own server). A private app sends it as an update to the installed stores you name by ID or domain, or with `--all` to every installed store that does not have it yet, in batches of the most stores the API accepts per request; each store accepts it in its admin. Refuses while `tringify.app.json` or a block source differs from the draft, or the draft's blocks fail `app block check`. |
+| `app release [--bump patch\|minor\|major] [--store ID\|DOMAIN]... [--all] [--notes TEXT]` | Releases the draft. A marketplace app submits it as a new version (`--bump`): the listing needs an icon, at least one screenshot, a privacy policy URL and a support email or URL (`app listing show` lists what is missing), and a version identical to the published one is refused, since a version is only for configuration or listing changes (code changes go live when you deploy your own server). A private app sends it as an update to the installed stores you name by ID or domain, or with `--all` to every installed store, in every region, that does not have it yet (the output names each region's result and any region that could not be updated); each store accepts it in its admin. Refuses while `tringify.app.json` or a block source differs from the draft, or the draft's blocks fail `app block check`. |
 | `app versions` | Lists the app's versions and their review status, or for a private app, the updates sent with their release notes and how many stores accepted each, have it waiting, or got a later version instead. |
 | `app publish VERSION` | Publishes an approved version so stores can install it or update to it. |
+| `app listing show [--app ID]` | Shows the app's App Store listing and lists what it still needs before a marketplace submit (icon, a screenshot, privacy policy URL, support email or URL). |
+| `app listing update [--app ID] [--icon FILE] [--screenshot FILE]... [--tagline T] [--short-description D] [--description D \| --description-file FILE] [--support-email EMAIL] [--support-url URL] [--privacy-url URL] [--terms-url URL]` | Changes the listing; only the parts you pass change. The icon is a 512×512 PNG, JPEG or WebP; passing `--screenshot` replaces all screenshots, in the order given. The change reaches the App Store with the next `app release` and `app publish`. |
 | `app webhook test` | Sends a signed `app.test` webhook to the app's webhook URL and reports what your endpoint answered. |
 | `app webhook rotate-key [--pipe-to COMMAND \| --json]` | Issues a new webhook signing secret and prints it once. For 72 hours, requests also carry a second signature made with the previous secret (`X-Tringify-Signature: t=…,v1=<new>,v1=<previous>`), so your app keeps verifying while you deploy the new one; the output says exactly when signatures made with the previous secret stop. Rotating again during those 72 hours stops signatures made with the oldest secret at once. `--pipe-to` stores it without printing it, as for `app secret rotate`; `--json` includes `previous_key_expires_at` (`null` when the app had no secret before). |
 | `app webhook finish-rotation [--app ID] [--yes]` | Stops signing requests with the previous webhook signing secret now instead of when its 72 hours end. Run it once the new secret is deployed everywhere you verify signatures. Asks first; `--yes` skips the question. |
 | `app secret rotate [--pipe-to COMMAND \| --json]` | Issues a new client secret and prints it once. For 72 hours the previous secret keeps working too, so your app keeps exchanging codes while you deploy the new one; the output says exactly when the previous secret stops working. Rotating again during those 72 hours stops the oldest secret at once. `--pipe-to` hands the new secret to your host's secret command on its standard input and never prints it, for example `--pipe-to "npx wrangler secret put TRINGIFY_CLIENT_SECRET"` or `--pipe-to "gcloud secrets versions add tringify-client-secret --data-file=-"`. Without it the secret is printed once; `--json` prints it as JSON with `previous_secret_expires_at` (`null` when the app had no secret before). |
 | `app secret finish-rotation [--yes]` | Stops accepting the previous client secret now instead of when its 72 hours end. Run it once the new secret is deployed everywhere, or right away if the previous secret was exposed. |
-| `app deliveries [--data] [--status STATUS] [--store STORE] [--delivery ID] [--event ID] [--cursor CURSOR] [--limit N]` | Lists webhook deliveries in every region, newest first (lifecycle, or with `--data` store data deliveries), with their status, store, region, attempts and your endpoint's last answer. `--store` takes a store ID, domain or part of its name. Prints the `--cursor` for the next page; a region that does not answer is named on stderr. |
+| `app deliveries [--data] [--status STATUS] [--event-type TYPE] [--store STORE] [--delivery ID] [--event ID] [--cursor CURSOR] [--limit N]` | Lists webhook deliveries in every region, newest first (lifecycle, or with `--data` store data deliveries), with their status, store, region, attempts and your endpoint's last answer. `--store` takes a store ID, domain or part of its name; `--event` (data deliveries only) an event ID; `--limit` is at most 100. Prints the `--cursor` for the next page; a region that does not answer is named on stderr. |
 | `app retire [--app ID] [--json]` | Shows whether the app can be retired and why, then opens the app's Danger Zone in the Developer Portal, where you confirm with your email code or passkey. A retired app leaves the App Store and accepts no new installs or versions; stores that installed it keep using it until they uninstall. Retiring cannot be undone. Any app that was ever used is retired, not deleted. |
 | `app delete [--app ID] [--json]` | Shows whether the app can be deleted and why, then opens the Danger Zone to confirm with your email code or passkey. Only an app that was never used on any region can be deleted; for any other app it lists the reasons and points to `app retire`. |
 | `version` | Prints the CLI version. |
+
+Commands that act on one app take `--app ID`, or read `app_id` from `tringify.app.json` (another file with `--file`). Run `tringify <command> --help` for every flag. The full reference, with guides for themes and apps, is at [dev-docs.tringify.com/cli](https://dev-docs.tringify.com/cli/).
 
 `app retire` and `app delete` print the platform's answer: the app's state, a summary, each reason the action is not available, regions that could not be checked, and the last delete request. They exit with an error when the action you asked for is not available. The CLI cannot confirm either action itself: both need your email code or passkey, which only the Developer Portal asks for. Set `TRINGIFY_NO_BROWSER=1` to only print the Danger Zone link; `--json` prints the answer as JSON and opens nothing.
 
@@ -180,10 +198,10 @@ If you used the `tringify-theme` command from the theme tools, every one of its 
 
 | Login | Access requested |
 | --- | --- |
-| Developer organization | View and edit your organization's themes and apps, release apps (submit, publish, private updates, install links), rotate app secrets, check whether an app can be retired or deleted, and list and create its development stores (`organization:themes:read`, `organization:themes:write`, `organization:apps:read`, `organization:apps:write`, `organization:apps:release`, `organization:apps:credentials`, `organization:apps:delete`, `organization:dev_stores:read`, `organization:dev_stores:write`) |
+| Developer organization | View and edit your organization's themes and apps (including creating free theme listings and editing app and theme listings), release apps (submit, publish, private updates, install links), rotate app secrets, check whether an app can be retired or deleted, and list and create its development stores (`organization:themes:read`, `organization:themes:write`, `organization:apps:read`, `organization:apps:write`, `organization:apps:release`, `organization:apps:credentials`, `organization:apps:delete`, `organization:dev_stores:read`, `organization:dev_stores:write`) |
 | Store | View and edit the store's storefront themes (`store:online_store.storefronts:read`, `store:online_store.storefronts:write`). With `theme dev --with-demo`, also add products and files (`store:products:write`, `store:files:write`). |
 
-The CLI never receives more access than your own role in that organization or store, and if your role changes, the CLI's access changes with it. Each app action needs the matching permission in your organization: editing needs Edit Apps, releasing needs Release Apps, rotating a secret needs Rotate App Credentials, and `app retire` and `app delete` need Delete Apps. It cannot change your live theme, delete stores, retire or delete apps (you confirm those in the Developer Portal), create listings, change pricing, or read an app's existing client secret. If you signed in before app or development store access was added, run `tringify login` again to use `app` or `store` commands; the same applies to `app retire` and `app delete` if you signed in before they were added.
+The CLI never receives more access than your own role in that organization or store, and if your role changes, the CLI's access changes with it. Each app action needs the matching permission in your organization: editing needs Edit Apps, releasing needs Release Apps, rotating a secret needs Rotate App Credentials, and `app retire` and `app delete` need Delete Apps. It cannot change your live theme, delete stores, retire or delete apps (you confirm those in the Developer Portal), create paid listings, change pricing, or read an app's existing client secret. If you signed in before app or development store access was added, run `tringify login` again to use `app` or `store` commands; the same applies to `app retire` and `app delete` if you signed in before they were added.
 
 Sign-in uses OAuth with PKCE and a one-time listener on `127.0.0.1`, so your password never passes through the CLI. Access tokens last 15 minutes and are refreshed automatically; refresh tokens rotate on every use. Tokens are kept only in your system keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux (GNOME Keyring, KWallet). Without one, sign-in stops and says so. If the keychain does not answer (for example a locked Secret Service over SSH, where it cannot show its unlock prompt), the CLI says it is waiting and stops after two minutes.
 
