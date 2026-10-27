@@ -97,7 +97,30 @@ tringify app publish 1.0.0                                   # once approved
 tringify app release --all --notes "New settings page"       # private
 ```
 
-`tringify.app.json` holds everything a release carries except the listing (name, descriptions, icon, screenshots, support and policy links), which you change with `tringify app listing update` or in the Developer Portal; `tringify app listing show` shows it and what it still needs before a marketplace submit. Pushing replaces the whole draft: a field you delete from the file is cleared. Stores only see a change once you release a version and publish it.
+`tringify.app.json` holds everything a release carries except the listing (name, descriptions, icon, screenshots, support email), which you change with `tringify app listing update` or in the Developer Portal; `tringify app listing show` shows it and what it still needs before a marketplace submit. Pushing replaces the whole draft: a field you delete from the file is cleared. Stores only see a change once you release a version and publish it.
+
+### Privacy policy, terms and docs
+
+Tringify hosts every app's privacy policy, terms of service and documentation at `https://apps-support.tringify.com/<app-handle>/privacy`, `/terms` and `/docs`. You write them in markdown; each change is reviewed and published as a numbered, dated version, and stores that installed the app are notified of a new privacy policy or terms version. The top of the privacy policy, what the app can access, is written by the platform from the app's current release. A marketplace app needs a published privacy policy and terms before its listing can be submitted.
+
+```sh
+tringify app privacy push --submit      # privacy.md
+tringify app terms push --submit        # terms.md
+tringify app docs push --submit         # docs/*.md, one page each
+tringify app privacy status             # draft, review, published version and its URL
+```
+
+Each docs page starts with front matter; the file name without `.md` is the page's address, and the first page is the docs home:
+
+```markdown
+---
+title: Getting started
+order: 1
+---
+Install the app from the App Store, then ...
+```
+
+The limits (length, number of pages, page addresses) come from the Developer API; the CLI checks them before sending and names the file that breaks one. Images must be on the Tringify CDN; others are shown as links.
 
 ### App blocks
 
@@ -165,11 +188,15 @@ tringify app block preview --theme ../my-theme --page collection
 | `app block context [--page PAGE] [--theme DIR] [--entity HANDLE]` | Prints the sample data each block that lists the page receives: the page's data cut to the block's `ctx_needs`. Uses the built-in sample catalog, or a theme's demo content with `--theme`. |
 | `app block preview [--theme DIR] [--page PAGE] [--after TYPE] [--port 9292]` | Serves a local preview of the theme (default: the [starter theme](https://github.com/tringify/theme-starter), downloaded as `theme init` does) with the app's blocks that list the page in its app block slot, after the theme block of type `--after` (default `price`). Blocks render as on a store: their mode's data only, the app markup policy, the page's app block budget and the `tf-ab-*` styles. Rebuilds when `tringify.app.json`, a block source or the theme changes. |
 | `app install-link [--store DOMAIN] [--draft] [--expires CHOICE] [--uses N]` | Prints a link that installs the app on a store. A private app installs its current draft; a marketplace app installs its published version, or with `--draft` its draft (development and transfer stores of your organization only). The expiry choices and the defaults for both flags come from the Developer API, the same as in the Developer Portal; an unknown `--expires` lists the choices. |
-| `app release [--bump patch\|minor\|major] [--store ID\|DOMAIN]... [--all] [--notes TEXT]` | Releases the draft. A marketplace app submits it as a new version (`--bump`): the listing needs an icon, at least one screenshot, a privacy policy URL and a support email or URL (`app listing show` lists what is missing), and a version identical to the published one is refused, since a version is only for configuration or listing changes (code changes go live when you deploy your own server). A private app sends it as an update to the installed stores you name by ID or domain, or with `--all` to every installed store, in every region, that does not have it yet (the output names each region's result and any region that could not be updated); each store accepts it in its admin. Refuses while `tringify.app.json` or a block source differs from the draft, or the draft's blocks fail `app block check`. |
+| `app release [--bump patch\|minor\|major] [--store ID\|DOMAIN]... [--all] [--notes TEXT]` | Releases the draft. A marketplace app submits it as a new version (`--bump`): the listing needs an icon, at least one screenshot, a support email, and the app needs a published privacy policy and terms of service (`app listing show` lists what is missing), and a version identical to the published one is refused, since a version is only for configuration or listing changes (code changes go live when you deploy your own server). A private app sends it as an update to the installed stores you name by ID or domain, or with `--all` to every installed store, in every region, that does not have it yet (the output names each region's result and any region that could not be updated); each store accepts it in its admin. Refuses while `tringify.app.json` or a block source differs from the draft, or the draft's blocks fail `app block check`. |
 | `app versions` | Lists the app's versions and their review status, or for a private app, the updates sent with their release notes and how many stores accepted each, have it waiting, or got a later version instead. |
 | `app publish VERSION` | Publishes an approved version so stores can install it or update to it. |
-| `app listing show [--app ID]` | Shows the app's App Store listing and lists what it still needs before a marketplace submit (icon, a screenshot, privacy policy URL, support email or URL). |
-| `app listing update [--app ID] [--icon FILE] [--screenshot FILE]... [--tagline T] [--short-description D] [--description D \| --description-file FILE] [--support-email EMAIL] [--support-url URL] [--privacy-url URL] [--terms-url URL]` | Changes the listing; only the parts you pass change. The icon is a 512×512 PNG, JPEG or WebP; passing `--screenshot` replaces all screenshots, in the order given. The change reaches the App Store with the next `app release` and `app publish`. |
+| `app listing show [--app ID]` | Shows the app's App Store listing and lists what it still needs before a marketplace submit, in the platform's words, with the command that fixes each (for example `app privacy push --submit`). |
+| `app listing update [--app ID] [--icon FILE] [--screenshot FILE]... [--tagline T] [--short-description D] [--description D \| --description-file FILE] [--support-email EMAIL]` | Changes the listing; only the parts you pass change. The icon is a 512×512 PNG, JPEG or WebP; passing `--screenshot` replaces all screenshots, in the order given. The change reaches the App Store with the next `app release` and `app publish`. |
+| `app privacy push [--file privacy.md] [--submit]` | Saves the markdown file as the draft of the app's privacy policy on its Tringify support site. With `--submit` it is also submitted for review; once approved it is published as a new version and stores that installed the app are notified. |
+| `app terms push [--file terms.md] [--submit]` | The same for the app's terms of service. |
+| `app docs push [--dir docs] [--submit]` | Saves every `.md` file directly in the folder as one page of the app's documentation, ordered by the `order` in its front matter, then by file name. |
+| `app privacy status`, `app terms status`, `app docs status` | Shows the public URL, the published version with its date, URL and whether the support site has it yet, the submission in review, the draft, and the last review decision with its note. |
 | `app webhook test` | Sends a signed `app.test` webhook to the app's webhook URL and reports what your endpoint answered. |
 | `app webhook rotate-key [--pipe-to COMMAND \| --json]` | Issues a new webhook signing secret and prints it once. For 72 hours, requests also carry a second signature made with the previous secret (`X-Tringify-Signature: t=…,v1=<new>,v1=<previous>`), so your app keeps verifying while you deploy the new one; the output says exactly when signatures made with the previous secret stop. Rotating again during those 72 hours stops signatures made with the oldest secret at once. `--pipe-to` stores it without printing it, as for `app secret rotate`; `--json` includes `previous_key_expires_at` (`null` when the app had no secret before). |
 | `app webhook finish-rotation [--app ID] [--yes]` | Stops signing requests with the previous webhook signing secret now instead of when its 72 hours end. Run it once the new secret is deployed everywhere you verify signatures. Asks first; `--yes` skips the question. |
