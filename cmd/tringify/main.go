@@ -64,7 +64,13 @@ Apps:
   app release           Release the draft: a new version, or a private app update
   app versions          List the app's versions
   app listing show      Show the app's App Store listing
-  app listing update    Change the listing's text, links, icon and screenshots
+  app listing update    Change the listing's text, support email, icon and screenshots
+  app privacy push      Save privacy.md as the draft privacy policy (--submit to send it for review)
+  app privacy status    Show the privacy policy's draft, review and published version
+  app terms push        Save terms.md as the draft terms of service (--submit to send it for review)
+  app terms status      Show the terms of service's draft, review and published version
+  app docs push         Save docs/*.md as the draft documentation (--submit to send it for review)
+  app docs status       Show the documentation's draft, review and published version
   app publish VERSION   Publish an approved version
   app webhook test      Send a test webhook to the app's webhook URL
   app webhook rotate-key Issue a new webhook signing secret; requests are also signed with the previous one for 72 hours

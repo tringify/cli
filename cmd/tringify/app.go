@@ -51,6 +51,8 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 		return a.appInstallLink(ctx, args[1:])
 	case "listing":
 		return a.appListing(ctx, args[1:])
+	case "privacy", "terms", "docs":
+		return a.appSiteCommand(ctx, args[0], args[1:])
 	case "versions":
 		return a.appVersions(ctx, args[1:])
 	case "publish":
