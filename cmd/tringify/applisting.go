@@ -15,10 +15,12 @@ import (
 	"github.com/tringify/cli/internal/appconfig"
 )
 
-// App Store listing: the text, links, icon and screenshots merchants see.
-// A listing change reaches the App Store with the app's next release.
+// App Store listing: the text, support email, icon and screenshots merchants
+// see. A listing change reaches the App Store with the app's next release.
+// The privacy policy, terms and docs are hosted by Tringify: `tringify app
+// privacy|terms|docs push`.
 
-var appListingFields = []string{"tagline", "short_description", "description", "support_email", "support_url", "privacy_url", "terms_url"}
+var appListingFields = []string{"tagline", "short_description", "description", "support_email"}
 
 func (a *app) appListing(ctx context.Context, args []string) error {
 	if len(args) == 0 {
@@ -53,7 +55,7 @@ func (a *app) appListingShow(ctx context.Context, args []string) error {
 		return err
 	}
 	a.printf("%s\n", str(current["name"]))
-	for _, row := range [][2]string{{"Tagline", "tagline"}, {"Short description", "short_description"}, {"Icon", "icon_url"}, {"Support email", "support_email"}, {"Support URL", "support_url"}, {"Privacy URL", "privacy_url"}, {"Terms URL", "terms_url"}} {
+	for _, row := range [][2]string{{"Tagline", "tagline"}, {"Short description", "short_description"}, {"Icon", "icon_url"}, {"Support email", "support_email"}} {
 		v := str(current[row[1]])
 		if v == "" {
 			v = "—"
@@ -66,12 +68,19 @@ func (a *app) appListingShow(ctx context.Context, args []string) error {
 		a.printf("\n%s\n", desc)
 	}
 	// Marketplace apps: what the submit gate still needs, in its words.
+	// The privacy policy and terms are documents of their own; name the
+	// command that publishes each.
+	commands := map[string]string{"privacy_policy": "tringify app privacy push --submit", "terms": "tringify app terms push --submit", "support_email": "tringify app listing update --support-email EMAIL"}
 	requirements, _ := current["listing_requirements"].([]any)
 	var missing []string
 	for _, raw := range requirements {
 		requirement, _ := raw.(map[string]any)
 		if done, _ := requirement["done"].(bool); !done {
-			missing = append(missing, str(requirement["message"]))
+			line := str(requirement["message"])
+			if command, ok := commands[str(requirement["key"])]; ok {
+				line += "\n      " + command + appArg(*appFlag, appID)
+			}
+			missing = append(missing, line)
 		}
 	}
 	if len(missing) > 0 {
@@ -93,9 +102,6 @@ func (a *app) appListingUpdate(ctx context.Context, args []string) error {
 	description := fs.String("description", "", "listing description")
 	descriptionFile := fs.String("description-file", "", "read the description from this file")
 	supportEmail := fs.String("support-email", "", "where merchants email for help")
-	supportURL := fs.String("support-url", "", "where merchants get help")
-	privacyURL := fs.String("privacy-url", "", "privacy policy page")
-	termsURL := fs.String("terms-url", "", "terms of use page")
 	var screenshots stringList
 	fs.Var(&screenshots, "screenshot", "screenshot image; repeat for each, in display order")
 	if _, err := parse(fs, args); err != nil {
@@ -128,7 +134,7 @@ func (a *app) appListingUpdate(ctx context.Context, args []string) error {
 	}
 	return a.updateAppListing(ctx, api, appID, appListingChange{
 		icon: *icon, screenshots: screenshots,
-		text: map[string]string{"tagline": *tagline, "short_description": *short, "description": *description, "support_email": *supportEmail, "support_url": *supportURL, "privacy_url": *privacyURL, "terms_url": *termsURL},
+		text: map[string]string{"tagline": *tagline, "short_description": *short, "description": *description, "support_email": *supportEmail},
 	})
 }
 
