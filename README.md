@@ -244,7 +244,7 @@ The same theme operations are available to MCP clients on the Tringify developer
 
 ## Contributing
 
-Bug reports and pull requests are welcome. Run `go test ./...` before sending a change.
+Bug reports and pull requests are welcome. Run `go build ./... && go vet ./...` before sending a change.
 
 ## License
 
