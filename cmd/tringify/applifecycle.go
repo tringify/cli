@@ -31,11 +31,8 @@ type appLifecycle struct {
 	Offer              string             `json:"offer"`
 	Summary            lifecycleMessage   `json:"summary"`
 	Reasons            []lifecycleMessage `json:"reasons"`
-	UnavailableRegions []struct {
-		Stamp string `json:"stamp"`
-		Name  string `json:"name"`
-	} `json:"unavailable_regions"`
-	DeleteRequest *struct {
+	UnavailableRegions unavailable        `json:"unavailable_regions"`
+	DeleteRequest      *struct {
 		Status      string             `json:"status"`
 		CreatedAt   time.Time          `json:"created_at"`
 		CompletedAt *time.Time         `json:"completed_at"`
@@ -55,7 +52,7 @@ func (a *app) appDelete(ctx context.Context, args []string) error {
 func (a *app) appLifecycleAction(ctx context.Context, args []string, action string) error {
 	summaries := map[string]string{
 		"retire": "Check whether the app can be retired and open the Developer Portal to retire it. A retired app leaves the App Store and accepts no new installs or versions; stores that installed it keep using it until they uninstall. Retiring cannot be undone. Any app that was ever used is retired, not deleted.",
-		"delete": "Check whether the app can be deleted and open the Developer Portal to delete it. Only an app that was never used on any region can be deleted; any other app can only be retired (`tringify app retire`).",
+		"delete": "Check whether the app can be deleted and open the Developer Portal to delete it. Only an app that was never used by any store can be deleted; any other app can only be retired (`tringify app retire`).",
 	}
 	fs := newFlags("app "+action+" [--app ID] [--json]", summaries[action]+" You confirm in the Developer Portal's Danger Zone because it needs your email code or passkey; set TRINGIFY_NO_BROWSER=1 to only print the link. Needs the Delete Apps permission; if the API refuses with a permission error, run `tringify login` again to grant it.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
@@ -143,10 +140,7 @@ func (a *app) printLifecycle(lc appLifecycle) {
 		}
 	}
 	if len(lc.UnavailableRegions) > 0 {
-		a.println("\nRegions that could not be checked:")
-		for _, r := range lc.UnavailableRegions {
-			a.printf("  - %s (%s)\n", r.Name, r.Stamp)
-		}
+		a.println("\nSome stores couldn't be checked right now. Try again in a few minutes.")
 	}
 	if dr := lc.DeleteRequest; dr != nil {
 		a.printf("\nLast delete request: %s, requested %s", dr.Status, formatExpiry(dr.CreatedAt))

@@ -357,7 +357,7 @@ func (a *app) appRelease(ctx context.Context, args []string) error {
 	notes := fs.String("notes", "", "release notes shown to stores")
 	var stores stringList
 	fs.Var(&stores, "store", "private apps: an installed store to update, by ID or domain (repeatable)")
-	all := fs.Bool("all", false, "private apps: update every installed store, in every region, that does not have the draft yet (each region picks its own stores)")
+	all := fs.Bool("all", false, "private apps: update every installed store that does not have the draft yet")
 	yes := fs.Bool("yes", false, "private apps: send without asking")
 	renderer := fs.String("renderer", "", rendererHelp)
 	if _, err := parse(fs, args); err != nil {
@@ -424,15 +424,14 @@ func (a *app) appRelease(ctx context.Context, args []string) error {
 	return nil
 }
 
-type region struct {
-	Stamp string `json:"stamp"`
-	Name  string `json:"name"`
-}
+// unavailable is the API's unavailable_regions list: stores an answer is
+// missing. Users are told that some stores are missing, not where they are.
+type unavailable []struct{}
 
-// printUnavailable names the regions whose stores a merged answer is missing.
-func (a *app) printUnavailable(regions []region) {
-	for _, r := range regions {
-		a.printf("Results from %s are unavailable right now; its stores are not included.\n", r.Name)
+// printUnavailable says when an answer is missing some stores.
+func (a *app) printUnavailable(missing unavailable) {
+	if len(missing) > 0 {
+		a.println("Some stores couldn't be reached right now and are not included. Try again in a few minutes.")
 	}
 }
 
@@ -442,10 +441,10 @@ type privateUpdatePreview struct {
 		ListPageSize int `json:"list_page_size"`
 		ListMaxLimit int `json:"list_max_limit"`
 	} `json:"limits"`
-	SnapshotSHA256     string   `json:"snapshot_sha256"`
-	Installed          int      `json:"installed"`
-	OutOfDate          int      `json:"out_of_date"`
-	UnavailableRegions []region `json:"unavailable_regions"`
+	SnapshotSHA256     string      `json:"snapshot_sha256"`
+	Installed          int         `json:"installed"`
+	OutOfDate          int         `json:"out_of_date"`
+	UnavailableRegions unavailable `json:"unavailable_regions"`
 }
 
 type privateUpdateInstallation struct {
@@ -455,13 +454,12 @@ type privateUpdateInstallation struct {
 	InstalledVersion string   `json:"installed_version"`
 	SnapshotSHA256   string   `json:"snapshot_sha256"`
 	PendingSHA256    string   `json:"pending_sha256"`
-	Region           region   `json:"region"`
 }
 
 type privateUpdateInstallations struct {
 	Items              []privateUpdateInstallation `json:"items"`
 	NextCursor         string                      `json:"next_cursor"`
-	UnavailableRegions []region                    `json:"unavailable_regions"`
+	UnavailableRegions unavailable                 `json:"unavailable_regions"`
 }
 
 func (a *app) privateUpdates(ctx context.Context, api *devapi.Client, appID string) (privateUpdatePreview, error) {
@@ -535,7 +533,7 @@ func (a *app) sendPrivateUpdate(ctx context.Context, api *devapi.Client, appID s
 			if len(install.StoreDomains) > 0 {
 				domain = install.StoreDomains[0]
 			}
-			a.printf("  %s  %s  %s  %s  %s\n", install.StoreID, domain, install.StoreName, install.InstalledVersion, install.Region.Name)
+			a.printf("  %s  %s  %s  %s\n", install.StoreID, domain, install.StoreName, install.InstalledVersion)
 		}
 		if page.NextCursor != "" {
 			a.println("  … and more. Find a store with --store ID or --store DOMAIN.")
@@ -624,7 +622,7 @@ func (a *app) sendPrivateUpdate(ctx context.Context, api *devapi.Client, appID s
 		a.println("Nothing sent.")
 	}
 	if failed > 0 {
-		return errors.New("the update did not reach every region (see above). Run the command again to send it to the rest")
+		return errors.New("the update did not reach every store (see above). Run the command again to send it to the rest")
 	}
 	return nil
 }
@@ -657,7 +655,7 @@ func (a *app) appVersions(ctx context.Context, args []string) error {
 				Accepted   int    `json:"accepted"`
 				Superseded int    `json:"superseded"`
 			} `json:"versions"`
-			UnavailableRegions []region `json:"unavailable_regions"`
+			UnavailableRegions unavailable `json:"unavailable_regions"`
 		}
 		if err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID)+"/private-updates/versions", nil, &history); err != nil {
 			return appAccess(err)
@@ -753,7 +751,7 @@ func (a *app) appWebhookTest(ctx context.Context, args []string) error {
 
 func (a *app) appDeliveries(ctx context.Context, args []string) error {
 	fs := newFlags("app deliveries [--data] [--status failed] [--store STORE] [--delivery ID] [--event ID] [--cursor CURSOR]",
-		"List webhook deliveries to the app in every region, newest first: lifecycle deliveries, or with --data store data deliveries. A region that does not answer is named on stderr; its deliveries are missing from the list.")
+		"List webhook deliveries to the app, newest first: lifecycle deliveries, or with --data store data deliveries. If some stores can't be reached, a note on stderr says their deliveries are missing from the list.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	data := fs.Bool("data", false, "list store data deliveries instead of lifecycle deliveries")
@@ -799,16 +797,15 @@ func (a *app) appDeliveries(ctx context.Context, args []string) error {
 			ResponseCode *int      `json:"last_response_code"`
 			LastError    *string   `json:"last_error"`
 			CreatedAt    time.Time `json:"created_at"`
-			Region       region    `json:"region"`
 		} `json:"items"`
-		NextCursor         string   `json:"next_cursor"`
-		UnavailableRegions []region `json:"unavailable_regions"`
+		NextCursor         string      `json:"next_cursor"`
+		UnavailableRegions unavailable `json:"unavailable_regions"`
 	}
 	if err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID)+path+"?"+query.Encode(), nil, &page); err != nil {
 		return appAccess(err)
 	}
-	for _, r := range page.UnavailableRegions {
-		fmt.Fprintf(a.stderr, "Results from %s are unavailable right now; they're missing from this list.\n", r.Name)
+	if len(page.UnavailableRegions) > 0 {
+		fmt.Fprintln(a.stderr, "Some stores couldn't be reached right now; their deliveries are missing from this list. Try again in a few minutes.")
 	}
 	if len(page.Items) == 0 {
 		a.println("No webhook deliveries.")
@@ -829,8 +826,8 @@ func (a *app) appDeliveries(ctx context.Context, args []string) error {
 		if store == "" {
 			store = d.StoreID
 		}
-		a.printf("%s  %s  %-28s %-10s %d attempt(s)  %s (%s)  %s\n", d.CreatedAt.UTC().Format("2006-01-02 15:04 UTC"), d.DeliveryID,
-			d.EventType, d.StatusLabel, d.Attempts, store, d.Region.Name, answer.String())
+		a.printf("%s  %s  %-28s %-10s %d attempt(s)  %s  %s\n", d.CreatedAt.UTC().Format("2006-01-02 15:04 UTC"), d.DeliveryID,
+			d.EventType, d.StatusLabel, d.Attempts, store, answer.String())
 	}
 	if page.NextCursor != "" {
 		a.printf("More deliveries: add --cursor %s\n", page.NextCursor)

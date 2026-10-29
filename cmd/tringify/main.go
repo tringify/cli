@@ -77,7 +77,7 @@ Apps:
   app webhook finish-rotation Stop signing requests with the previous webhook signing secret now
   app secret rotate     Issue a new client secret; the previous one keeps working for 72 hours
   app secret finish-rotation Stop accepting the previous client secret now
-  app deliveries        List webhook deliveries in every region
+  app deliveries        List webhook deliveries to the app
   app retire            Check whether the app can be retired, then confirm in the Developer Portal
   app delete            Check whether the app can be deleted (never used only), then confirm in the Developer Portal
 
