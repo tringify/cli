@@ -171,7 +171,7 @@ func (a *app) updateAppListing(ctx context.Context, api devAPIDoer, appID string
 		}
 	}
 	if change.icon != "" {
-		id, err := a.uploadMedia(ctx, api, change.icon, "/org/files/upload-intents", map[string]any{"category": "app_icon"})
+		id, err := a.uploadMedia(ctx, api, change.icon, "/org/apps/media/upload-intents", map[string]any{"category": "app_icon"})
 		if err != nil {
 			return err
 		}
@@ -181,7 +181,7 @@ func (a *app) updateAppListing(ctx context.Context, api devAPIDoer, appID string
 	if len(change.screenshots) > 0 {
 		var shots []string
 		for _, p := range change.screenshots {
-			id, err := a.uploadMedia(ctx, api, p, "/org/files/upload-intents", map[string]any{"category": "app_screenshot"})
+			id, err := a.uploadMedia(ctx, api, p, "/org/apps/media/upload-intents", map[string]any{"category": "app_screenshot"})
 			if err != nil {
 				return err
 			}
