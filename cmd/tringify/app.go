@@ -350,15 +350,12 @@ func (a *app) appDistribution(ctx context.Context, api *devapi.Client, appID str
 }
 
 func (a *app) appRelease(ctx context.Context, args []string) error {
-	fs := newFlags("app release [--bump patch|minor|major] [--store ID|DOMAIN]... [--all] [--notes TEXT]", "Release the app's draft. Checks the draft's app blocks first (see `tringify app block check`) and releases nothing if they have problems. A marketplace app submits it as a new version: the previous version number with the part you name in --bump increased, where major marks the version as breaking. A private app sends it as an update to the installed stores you name with --store, or to every store that does not have it yet with --all; each store accepts it in its admin.")
+	fs := newFlags("app release [--bump patch|minor|major] [--notes TEXT]", "Release the app's draft. Checks the draft's app blocks first (see `tringify app block check`) and releases nothing if they have problems. A marketplace app submits it as a new version: the previous version number with the part you name in --bump increased, where major marks the version as breaking. A private app releases it as a new version to every store that has the app. Stores move to a new version by themselves; one that asks for more access waits until the store approves it.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	bump := fs.String("bump", "", "marketplace apps: patch, minor or major")
 	notes := fs.String("notes", "", "release notes shown to stores")
-	var stores stringList
-	fs.Var(&stores, "store", "private apps: an installed store to update, by ID or domain (repeatable)")
-	all := fs.Bool("all", false, "private apps: update every installed store that does not have the draft yet")
-	yes := fs.Bool("yes", false, "private apps: send without asking")
+	yes := fs.Bool("yes", false, "private apps: release without asking")
 	renderer := fs.String("renderer", "", rendererHelp)
 	if _, err := parse(fs, args); err != nil {
 		return err
@@ -397,10 +394,7 @@ func (a *app) appRelease(ctx context.Context, args []string) error {
 		if *bump != "" {
 			return errors.New("--bump is for marketplace apps; private updates are numbered for you")
 		}
-		return a.sendPrivateUpdate(ctx, api, appID, stores, *all, *notes, *yes)
-	}
-	if len(stores) > 0 || *all {
-		return errors.New("--store and --all are for private apps; a marketplace version reaches stores once it is published")
+		return a.sendPrivateUpdate(ctx, api, appID, *notes, *yes)
 	}
 	if *bump != "patch" && *bump != "minor" && *bump != "major" {
 		return errors.New("--bump must be patch, minor or major")
@@ -436,68 +430,16 @@ func (a *app) printUnavailable(missing unavailable) {
 }
 
 type privateUpdatePreview struct {
-	Limits struct {
-		MaxStores    int `json:"max_stores"`
-		ListPageSize int `json:"list_page_size"`
-		ListMaxLimit int `json:"list_max_limit"`
-	} `json:"limits"`
 	SnapshotSHA256     string      `json:"snapshot_sha256"`
 	Installed          int         `json:"installed"`
 	OutOfDate          int         `json:"out_of_date"`
 	UnavailableRegions unavailable `json:"unavailable_regions"`
 }
 
-type privateUpdateInstallation struct {
-	StoreID          string   `json:"store_id"`
-	StoreName        string   `json:"store_name"`
-	StoreDomains     []string `json:"store_domains"`
-	InstalledVersion string   `json:"installed_version"`
-	SnapshotSHA256   string   `json:"snapshot_sha256"`
-	PendingSHA256    string   `json:"pending_sha256"`
-}
-
-type privateUpdateInstallations struct {
-	Items              []privateUpdateInstallation `json:"items"`
-	NextCursor         string                      `json:"next_cursor"`
-	UnavailableRegions unavailable                 `json:"unavailable_regions"`
-}
-
 func (a *app) privateUpdates(ctx context.Context, api *devapi.Client, appID string) (privateUpdatePreview, error) {
 	var preview privateUpdatePreview
 	err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID)+"/private-updates", nil, &preview)
 	return preview, appAccess(err)
-}
-
-func (a *app) privateUpdateInstallations(ctx context.Context, api *devapi.Client, appID, store string, limit int) (privateUpdateInstallations, error) {
-	var page privateUpdateInstallations
-	q := url.Values{"limit": {fmt.Sprint(limit)}}
-	if store != "" {
-		q.Set("store", store)
-	}
-	err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID)+"/private-updates/installations?"+q.Encode(), nil, &page)
-	return page, appAccess(err)
-}
-
-// resolveStore finds the installation --store names: a store ID or any of
-// the store's domains, matched exactly (the server matches the text).
-func (a *app) resolveStore(ctx context.Context, api *devapi.Client, appID, store string, preview privateUpdatePreview) (privateUpdateInstallation, error) {
-	want := strings.ToLower(strings.TrimSpace(store))
-	page, err := a.privateUpdateInstallations(ctx, api, appID, want, preview.Limits.ListMaxLimit)
-	if err != nil {
-		return privateUpdateInstallation{}, err
-	}
-	a.printUnavailable(page.UnavailableRegions)
-	for _, install := range page.Items {
-		if strings.EqualFold(install.StoreID, want) {
-			return install, nil
-		}
-		for _, domain := range install.StoreDomains {
-			if strings.EqualFold(domain, want) {
-				return install, nil
-			}
-		}
-	}
-	return privateUpdateInstallation{}, fmt.Errorf("no store with ID or domain %s has installed the app. Run `tringify app release` without --store to list the installed stores", store)
 }
 
 type privateUpdateSent struct {
@@ -513,7 +455,7 @@ type privateUpdateSent struct {
 	NextCursor string `json:"next_cursor"`
 }
 
-func (a *app) sendPrivateUpdate(ctx context.Context, api *devapi.Client, appID string, stores []string, all bool, notes string, yes bool) error {
+func (a *app) sendPrivateUpdate(ctx context.Context, api *devapi.Client, appID string, notes string, yes bool) error {
 	preview, err := a.privateUpdates(ctx, api, appID)
 	if err != nil {
 		return err
@@ -522,113 +464,54 @@ func (a *app) sendPrivateUpdate(ctx context.Context, api *devapi.Client, appID s
 	if preview.Installed == 0 && len(preview.UnavailableRegions) == 0 {
 		return errors.New("no store has installed the app yet. Create an install link with `tringify app install-link`")
 	}
-	if !all && len(stores) == 0 {
-		page, err := a.privateUpdateInstallations(ctx, api, appID, "", preview.Limits.ListPageSize)
-		if err != nil {
-			return err
-		}
-		a.printf("Installed stores (%d, %d not on the draft), newest first:\n", preview.Installed, preview.OutOfDate)
-		for _, install := range page.Items {
-			domain := ""
-			if len(install.StoreDomains) > 0 {
-				domain = install.StoreDomains[0]
-			}
-			a.printf("  %s  %s  %s  %s\n", install.StoreID, domain, install.StoreName, install.InstalledVersion)
-		}
-		if page.NextCursor != "" {
-			a.println("  … and more. Find a store with --store ID or --store DOMAIN.")
-		}
-		return errors.New("name the stores to update with --store ID or --store DOMAIN, or use --all")
-	}
-	var targets []string
-	for _, store := range stores {
-		install, err := a.resolveStore(ctx, api, appID, store, preview)
-		if err != nil {
-			return err
-		}
-		if install.SnapshotSHA256 == preview.SnapshotSHA256 || install.PendingSHA256 == preview.SnapshotSHA256 {
-			a.printf("%s already has this draft or has it waiting for approval; skipped.\n", install.StoreName)
-			continue
-		}
-		targets = append(targets, install.StoreID)
-	}
-	count := len(targets)
-	if all {
-		count = preview.OutOfDate
-	}
-	if count == 0 {
-		a.println("Every named or installed store already has this draft or has it waiting for approval.")
+	if preview.OutOfDate == 0 {
+		a.println("Every store that has the app already runs this draft or has it waiting for approval.")
 		return nil
 	}
 	if !yes {
-		ok, err := confirmWith(a.stdin, a.stdout, fmt.Sprintf("Send the draft to %d store(s)?", count), "Pass --yes to send without confirming")
+		ok, err := confirmWith(a.stdin, a.stdout, fmt.Sprintf("Release the draft to %d store(s)?", preview.OutOfDate), "Pass --yes to release without confirming")
 		if err != nil || !ok {
 			if err == nil {
-				a.println("Nothing sent.")
+				a.println("Nothing released.")
 			}
 			return err
 		}
 	}
 	path := "/apps/" + url.PathEscape(appID) + "/private-updates"
-	failed := 0
-	send := func(body map[string]any) (privateUpdateSent, error) {
+	failed, offered, version := 0, 0, ""
+	// Each region moves its own out-of-date stores; a release that has more
+	// to do returns next_cursor and the same request continues it.
+	cursor := ""
+	for {
 		var sent privateUpdateSent
-		err := api.Do(ctx, http.MethodPost, path, body, &sent)
+		err := api.Do(ctx, http.MethodPost, path, map[string]any{"snapshot_sha256": preview.SnapshotSHA256, "cursor": cursor, "release_notes": notes}, &sent)
 		for _, r := range sent.Regions {
 			a.println(r.Message)
 			if r.Status == "failed" {
 				failed++
 			}
 		}
-		return sent, appAccess(err)
-	}
-	offered, version := 0, ""
-	if all {
-		// Each region picks its own out-of-date stores; a send that has more
-		// to do returns next_cursor and the same request continues it.
-		cursor := ""
-		for {
-			sent, err := send(map[string]any{"snapshot_sha256": preview.SnapshotSHA256, "all": true, "cursor": cursor, "release_notes": notes})
-			if err != nil {
-				return err
-			}
-			offered, version = offered+sent.Offered, sent.Release.Version
-			if cursor = sent.NextCursor; cursor == "" {
-				break
-			}
+		if err != nil {
+			return appAccess(err)
 		}
-	} else {
-		// The API names at most limits.max_stores stores a request; every
-		// batch freezes the same draft and notes, so all offer one version.
-		batch := preview.Limits.MaxStores
-		if batch <= 0 {
-			return errors.New("the Developer API did not say how many stores one update request may name")
-		}
-		for start := 0; start < len(targets); start += batch {
-			end := min(start+batch, len(targets))
-			sent, err := send(map[string]any{"snapshot_sha256": preview.SnapshotSHA256, "store_ids": targets[start:end], "release_notes": notes})
-			if err != nil {
-				if offered > 0 {
-					return fmt.Errorf("sent version %s to %d store(s), then: %w. Run the command again to send it to the rest", version, offered, err)
-				}
-				return err
-			}
-			offered, version = offered+sent.Offered, sent.Release.Version
+		offered, version = offered+sent.Offered, sent.Release.Version
+		if cursor = sent.NextCursor; cursor == "" {
+			break
 		}
 	}
 	if offered > 0 {
-		a.printf("Sent version %s to %d store(s). Each store accepts the update in its admin.\n", version, offered)
+		a.printf("Released version %s to %d store(s). Stores move to it by themselves; any that it asks for more access approve it in their admin.\n", version, offered)
 	} else {
-		a.println("Nothing sent.")
+		a.println("Nothing released.")
 	}
 	if failed > 0 {
-		return errors.New("the update did not reach every store (see above). Run the command again to send it to the rest")
+		return errors.New("the release did not reach every store (see above). Run the command again to reach the rest")
 	}
 	return nil
 }
 
 func (a *app) appVersions(ctx context.Context, args []string) error {
-	fs := newFlags("app versions", "List the app's versions, newest first. For a private app, each version shows how many stores accepted it, how many have it waiting, how many got a later version instead, and its release notes.")
+	fs := newFlags("app versions", "List the app's versions, newest first. For a private app, each version shows how many stores run it, how many are waiting to approve the more access it asks for, how many moved on to a later version, and its release notes.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	if _, err := parse(fs, args); err != nil {
@@ -665,7 +548,7 @@ func (a *app) appVersions(ctx context.Context, args []string) error {
 			a.println("No updates sent yet. Stores that install from a link get the draft as it is then.")
 		}
 		for _, v := range history.Versions {
-			a.printf("%-10s %d accepted, %d waiting, %d replaced by a later version\n", v.Version, v.Accepted, v.Pending, v.Superseded)
+			a.printf("%-10s %d running, %d waiting for approval, %d moved to a later version\n", v.Version, v.Accepted, v.Pending, v.Superseded)
 			if notes := strings.TrimSpace(v.Notes); notes != "" {
 				for _, line := range strings.Split(notes, "\n") {
 					a.printf("           %s\n", line)

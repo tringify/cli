@@ -89,12 +89,12 @@ tringify app webhook test               # sends a signed app.test webhook
 tringify app install-link --store my-store.mytringify.com
 ```
 
-A marketplace app then releases versions; a private app sends updates to stores that installed it:
+A marketplace app then releases versions; a private app releases each version to every store that installed it. Stores move to a new version by themselves; one that asks for more access waits until the store approves it.
 
 ```sh
 tringify app release --bump minor --notes "First release"   # marketplace
 tringify app publish 1.0.0                                   # once approved
-tringify app release --all --notes "New settings page"       # private
+tringify app release --notes "New settings page"             # private
 ```
 
 An app whose scopes can read customer data (`read_customers`, `read_orders`, or a write scope that includes them) needs a webhook URL: `app config push` and `app release` refuse it otherwise (`APP_PRIVACY_WEBHOOK_REQUIRED`). Every app receives the mandatory privacy events at that URL, even while webhooks are switched off: `app.store_redact` (48 hours after a store uninstalls the app, unless it reinstalls first, and at once when the store is deleted) and, for apps that can read customer data, `app.customer_data_request` and `app.customer_redact`. They cannot be unsubscribed; the [app starter](https://github.com/tringify/app-starter) handles all three.

@@ -61,7 +61,7 @@ Apps:
   app block context     Print the sample data each app block receives on a page
   app block preview     Preview the app's blocks inside a theme, as a store renders them
   app install-link      Create a link that installs the app on a store
-  app release           Release the draft: a new version, or a private app update
+  app release           Release the draft as a new version
   app versions          List the app's versions
   app listing show      Show the app's App Store listing
   app listing update    Change the listing's text, support email, icon and screenshots
