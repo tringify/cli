@@ -47,13 +47,29 @@ func (a *app) storeList(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	var data struct {
-		Stores []any `json:"stores"`
+	// Pages at the server's own page size, following next_cursor, so the
+	// list never asks for more than the server allows.
+	var stores []any
+	cursor := ""
+	for {
+		var data struct {
+			Stores     []any  `json:"stores"`
+			NextCursor string `json:"next_cursor"`
+		}
+		path := "/stores"
+		if cursor != "" {
+			path += "?cursor=" + url.QueryEscape(cursor)
+		}
+		if err := api.Do(ctx, http.MethodGet, path, nil, &data); err != nil {
+			return devStoreAccess(err)
+		}
+		stores = append(stores, data.Stores...)
+		if data.NextCursor == "" || data.NextCursor == cursor {
+			break
+		}
+		cursor = data.NextCursor
 	}
-	if err := api.Do(ctx, http.MethodGet, "/stores?limit=100", nil, &data); err != nil {
-		return devStoreAccess(err)
-	}
-	list := listAt(data.Stores, "")
+	list := listAt(stores, "")
 	if len(list) == 0 {
 		a.printf("No development stores in %s. Create one with `tringify store create --name NAME`.\n", session.Account.Target.Name)
 		return nil
