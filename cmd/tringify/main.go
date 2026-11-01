@@ -57,6 +57,7 @@ Apps:
   app init              Create a project for an app from the app starter
   app config pull       Write the app's configuration to tringify.app.json
   app config push       Replace the app's draft configuration with tringify.app.json
+  app config check      Check tringify.app.json with the app platform's rules, without pushing
   app block check       Check the app's blocks with the app platform's rules
   app block context     Print the sample data each app block receives on a page
   app block preview     Preview the app's blocks inside a theme, as a store renders them

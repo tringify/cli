@@ -41,6 +41,9 @@ type Error struct {
 	Message string
 	// Detail is the API's explanation of a validation failure, when it gives one.
 	Detail string
+	// Field is the request field a validation failure concerns, as a path
+	// (server_events.attribution.cookies), when the API names one.
+	Field string
 }
 
 func (e *Error) Error() string {
@@ -50,6 +53,9 @@ func (e *Error) Error() string {
 	message := e.Message
 	if e.Detail != "" && e.Detail != e.Message {
 		message += " " + e.Detail
+	}
+	if e.Field != "" {
+		message = e.Field + ": " + message
 	}
 	if e.Code != "" {
 		return message + " (" + e.Code + ")"
@@ -157,10 +163,13 @@ func apiError(status int, raw []byte) *Error {
 	if envelope.Error != nil {
 		e.Code, e.Message, details = envelope.Error.Code, envelope.Error.Message, envelope.Error.Details
 	}
-	// Only a text explanation is shown; structured details stay out of the
-	// one-line error.
-	if text, ok := details.(string); ok {
-		e.Detail = text
+	// Only a text explanation and the field it concerns are shown; other
+	// structured details stay out of the one-line error.
+	switch d := details.(type) {
+	case string:
+		e.Detail = d
+	case map[string]any:
+		e.Field, _ = d["field"].(string)
 	}
 	// A reply that is not the API's error format (from a proxy, say) is shown
 	// as the start of its text, so the failure can still be reported.

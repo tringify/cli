@@ -84,10 +84,19 @@ tringify app create --name "My app" --type standard --distribution private
 tringify app init --app APP_ID          # project from the app starter, with tringify.app.json
 # edit tringify.app.json: scopes, webhook URL, admin URL, events
 tringify app block preview              # the example block, blocks/instalments.vasc, in the starter theme
-tringify app config push                # checks the blocks, shows what changes, then replaces the draft
+tringify app config check               # the platform's checks, without pushing
+tringify app config push                # runs the check, shows what changes, then replaces the draft
 tringify app webhook test               # sends a signed app.test webhook
 tringify app install-link --store my-store.mytringify.com
 ```
+
+`app config check` has the Developer API check the whole file exactly as a push would, and saves nothing. Each problem names the field it concerns, for example the click IDs and cookies an advertising app declares under `server_events.attribution`:
+
+```text
+Error: server_events.attribution.click_id_parameters: Event delivery: utm_click starts with utm_, which the platform reserves. (APP_SERVER_EVENTS_INVALID)
+```
+
+Stores see those names on the install screen under "Ad click IDs and cookies" and in the app's privacy section. The [app configuration file reference](https://dev-docs.tringify.com/apps/apps/configuration) lists the rules.
 
 A marketplace app then releases versions; a private app releases each version to every store that installed it. Stores move to a new version by themselves; one that asks for more access waits until the store approves it.
 
@@ -185,7 +194,8 @@ tringify app block preview --theme ../my-theme --page collection
 | `app categories [--type standard\|sales_channel] [--json]` | Lists the category and subcategory IDs to pass to `app create`. Needs no sign-in. |
 | `app init --app ID [DIR]` | Creates a project from [app-starter](https://github.com/tringify/app-starter) in a new directory (default: the app's handle), writes the app's configuration to `tringify.app.json` and its block sources to `blocks/`, adds an example template block (`blocks/instalments.vasc`: the price split into payments, with the number of payments as a merchant setting), sets the app and client IDs, and creates `.dev.vars` for local development. Add the client secret from `app create` and the signing secret from `app webhook rotate-key` to it. |
 | `app config pull [--app ID] [--file PATH] [--yes]` | Writes the app's draft configuration to `tringify.app.json` and each block's source to `blocks/<key>.vasc`. If the files exist and differ, shows the differences and asks first. Lists `.vasc` files in `blocks/` that no block uses any more, and leaves them in place. |
-| `app config push [--file PATH] [--yes]` | Checks the app blocks, shows the fields that differ from the draft and, once you confirm, replaces the draft with the file and the block sources it names. Unknown fields are refused. The saved values are written back to the files when the platform normalizes them, for example sorting scopes. |
+| `app config check [--file PATH]` | Checks the app blocks, then has the Developer API check the file and the block sources it names exactly as a push would, without changing the draft. Prints each problem with the field it concerns, such as `server_events.attribution.cookies`. |
+| `app config push [--file PATH] [--yes]` | Runs `app config check` and pushes nothing if it finds a problem, then shows the fields that differ from the draft and, once you confirm, replaces the draft with the file and the block sources it names. Unknown fields are refused. The saved values are written back to the files when the platform normalizes them, for example sorting scopes. |
 | `app block check [--file PATH]` | Checks the app's blocks with the rules the platform applies when the configuration is pushed, and prints each problem as `FILE:LINE: message`. |
 | `app block context [--page PAGE] [--theme DIR] [--entity HANDLE]` | Prints the sample data each block that lists the page receives: the page's data cut to the block's `ctx_needs`. Uses the built-in sample catalog, or a theme's demo content with `--theme`. |
 | `app block preview [--theme DIR] [--page PAGE] [--after TYPE] [--port 9292]` | Serves a local preview of the theme (default: the [starter theme](https://github.com/tringify/theme-starter), downloaded as `theme init` does) with the app's blocks that list the page in its app block slot, after the theme block of type `--after` (default `price`). Blocks render as on a store: their mode's data only, the app markup policy, the page's app block budget and the `tf-ab-*` styles. Rebuilds when `tringify.app.json`, a block source or the theme changes. |

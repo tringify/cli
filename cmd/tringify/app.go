@@ -40,9 +40,11 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 				return a.appConfigPull(ctx, args[2:])
 			case "push":
 				return a.appConfigPush(ctx, args[2:])
+			case "check":
+				return a.appConfigCheck(ctx, args[2:])
 			}
 		}
-		return errors.New("usage: tringify app config pull|push")
+		return errors.New("usage: tringify app config pull|push|check")
 	case "block":
 		return a.appBlock(ctx, args[1:])
 	case "release":
@@ -237,7 +239,7 @@ func (a *app) writeConfig(file string, config []byte) error {
 }
 
 func (a *app) appConfigPush(ctx context.Context, args []string) error {
-	fs := newFlags("app config push [--file PATH]", "Replace the app's draft configuration with "+appconfig.FileName+" and the block sources it names. Checks the app blocks first (see `tringify app block check`) and pushes nothing if they have problems. Shows what changes and asks first. Fields left out of the file are cleared. The draft goes live only when you release it.")
+	fs := newFlags("app config push [--file PATH]", "Replace the app's draft configuration with "+appconfig.FileName+" and the block sources it names. Runs `tringify app config check` first and pushes nothing if it finds a problem. Shows what changes and asks first. Fields left out of the file are cleared. The draft goes live only when you release it.")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	yes := fs.Bool("yes", false, "replace without asking")
 	renderer := fs.String("renderer", "", rendererHelp)
@@ -269,6 +271,9 @@ func (a *app) appConfigPush(ctx context.Context, args []string) error {
 	if err := a.checkBlocks(ctx, *file, raw, *renderer); err != nil {
 		return fmt.Errorf("%w; nothing pushed", err)
 	}
+	if err := checkConfig(ctx, api, appID, raw); err != nil {
+		return fmt.Errorf("%w; nothing pushed", err)
+	}
 	a.println("Pushing changes the draft:")
 	a.printConfigChanges(changes)
 	if !*yes {
@@ -298,6 +303,46 @@ func (a *app) appConfigPush(ctx context.Context, args []string) error {
 		}
 		a.printf("Updated %s with the values as saved.\n", *file)
 	}
+	return nil
+}
+
+// checkConfig has the Developer API check the configuration exactly as a
+// push would, with the same errors, and save nothing. The platform's rules
+// (event delivery and its attribution declaration, scopes, origins) live
+// there, so the CLI never keeps its own copy of them.
+func checkConfig(ctx context.Context, api *devapi.Client, appID string, raw []byte) error {
+	if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/config/check", json.RawMessage(raw), nil); err != nil {
+		return appAccess(err)
+	}
+	return nil
+}
+
+func (a *app) appConfigCheck(ctx context.Context, args []string) error {
+	fs := newFlags("app config check [--file PATH]", "Check "+appconfig.FileName+" and the block sources it names without changing the draft: the app blocks first (see `tringify app block check`), then the whole configuration, which the Developer API checks exactly as it would on push, for example event delivery and the click IDs and cookies it declares under server_events.attribution. A problem is printed with the field it concerns, such as server_events.attribution.cookies. `app config push` runs this check first.")
+	file := fs.String("file", appconfig.FileName, "configuration file")
+	renderer := fs.String("renderer", "", rendererHelp)
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	local, raw, _, err := appconfig.Load(*file)
+	if err != nil {
+		return err
+	}
+	appID := local.AppID()
+	if appID == "" {
+		return fmt.Errorf("%s has no app_id. Run `tringify app config pull --app ID` to start from the app's current configuration", *file)
+	}
+	if err := a.checkBlocks(ctx, *file, raw, *renderer); err != nil {
+		return err
+	}
+	api, _, err := a.devAPI()
+	if err != nil {
+		return err
+	}
+	if err := checkConfig(ctx, api, appID, raw); err != nil {
+		return err
+	}
+	a.printf("%s passes the app platform's checks. Nothing was pushed.\n", *file)
 	return nil
 }
 
