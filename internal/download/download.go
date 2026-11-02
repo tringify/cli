@@ -1,4 +1,4 @@
-// Package download retrieves theme packages from short-lived R2 links.
+// Package download retrieves theme packages from short-lived download links.
 package download
 
 import (
@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
-	"strconv"
 	"time"
 )
 
@@ -35,19 +34,11 @@ func Get(ctx context.Context, client *http.Client, link Link) ([]byte, string, e
 	if link.SizeBytes <= 0 || link.SizeBytes > maxPackageBytes {
 		return nil, "", errors.New("the theme package size must be between 1 byte and 256 MiB")
 	}
-	// R2's signature timestamp accounts for time already spent since issuance.
-	signedAt, err := time.Parse("20060102T150405Z", u.Query().Get("X-Amz-Date"))
-	ttl, ttlErr := strconv.ParseInt(u.Query().Get("X-Amz-Expires"), 10, 64)
-	if err != nil || ttlErr != nil || ttl <= 0 || ttl > 604800 || link.ExpiresIn <= 0 || link.ExpiresIn > 604800 {
+	// The link is a files.tringify.com grant; expires_in is its remaining life.
+	if link.ExpiresIn <= 0 || link.ExpiresIn > 604800 {
 		return nil, "", errors.New("the server returned an invalid theme download expiry")
 	}
-	deadline := signedAt.Add(time.Duration(ttl) * time.Second)
-	if !time.Now().Before(deadline) {
-		return nil, "", errors.New("the theme download link has expired; run the command again")
-	}
-	if relative := time.Now().Add(time.Duration(link.ExpiresIn) * time.Second); relative.Before(deadline) {
-		deadline = relative
-	}
+	deadline := time.Now().Add(time.Duration(link.ExpiresIn) * time.Second)
 	ctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link.DownloadURL, nil)
