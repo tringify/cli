@@ -64,13 +64,16 @@ func (a *app) appListingShow(ctx context.Context, args []string) error {
 	}
 	shots, _ := current["screenshot_file_ids"].([]any)
 	a.printf("  %-18s %d\n", "Screenshots:", len(shots))
+	if cat := str(current["category_id"]); cat != "" {
+		a.printf("  %-18s %s / %s\n", "Category:", cat, str(current["subcategory_id"]))
+	}
 	if desc := str(current["description"]); desc != "" {
 		a.printf("\n%s\n", desc)
 	}
 	// Marketplace apps: what the submit gate still needs, in its words.
 	// The privacy policy and terms are documents of their own; name the
 	// command that publishes each.
-	commands := map[string]string{"privacy_policy": "tringify app privacy push --submit", "terms": "tringify app terms push --submit", "support_email": "tringify app listing update --support-email EMAIL"}
+	commands := map[string]string{"privacy_policy": "tringify app privacy push --submit", "terms": "tringify app terms push --submit", "support_email": "tringify app listing update --support-email EMAIL", "category": "tringify app listing update --category ID --subcategory ID   (IDs: tringify app categories)"}
 	requirements, _ := current["listing_requirements"].([]any)
 	var missing []string
 	for _, raw := range requirements {
@@ -93,7 +96,7 @@ func (a *app) appListingShow(ctx context.Context, args []string) error {
 }
 
 func (a *app) appListingUpdate(ctx context.Context, args []string) error {
-	fs := newFlags("app listing update [--app ID] [--icon FILE] [--screenshot FILE]... [--tagline T] [--description D]", "Change the app's App Store listing. Only the parts you pass change. The icon is a 512×512 PNG, JPEG or WebP; passing --screenshot replaces all screenshots, in the order given. The change reaches the App Store with the next `tringify app release` and `tringify app publish`.")
+	fs := newFlags("app listing update [--app ID] [--icon FILE] [--screenshot FILE]... [--tagline T] [--description D] [--category ID --subcategory ID]", "Change the app's App Store listing. Only the parts you pass change. The icon is a 512×512 PNG, JPEG or WebP; passing --screenshot replaces all screenshots, in the order given. --category and --subcategory (see `tringify app categories`) place a standard app in the App Store; a sales channel app's category is set when it is created. The change reaches the App Store with the next `tringify app release` and `tringify app publish`.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	icon := fs.String("icon", "", "app icon image, 512×512")
@@ -102,6 +105,8 @@ func (a *app) appListingUpdate(ctx context.Context, args []string) error {
 	description := fs.String("description", "", "listing description")
 	descriptionFile := fs.String("description-file", "", "read the description from this file")
 	supportEmail := fs.String("support-email", "", "where merchants email for help")
+	category := fs.String("category", "", "App Store category ID (see `tringify app categories`)")
+	subcategory := fs.String("subcategory", "", "App Store subcategory ID, within --category")
 	var screenshots stringList
 	fs.Var(&screenshots, "screenshot", "screenshot image; repeat for each, in display order")
 	if _, err := parse(fs, args); err != nil {
@@ -128,9 +133,22 @@ func (a *app) appListingUpdate(ctx context.Context, args []string) error {
 			return err
 		}
 	}
+	if (*category == "") != (*subcategory == "") {
+		return errors.New("pass --category and --subcategory together")
+	}
 	api, _, err := a.devAPI()
 	if err != nil {
 		return err
+	}
+	if *category != "" {
+		// The category is an app setting, not part of the listing text.
+		if err := api.Do(ctx, http.MethodPut, "/apps/"+url.PathEscape(appID), map[string]any{"category_id": *category, "subcategory_id": *subcategory}, nil); err != nil {
+			return err
+		}
+		a.printf("Set the App Store category to %s / %s.\n", *category, *subcategory)
+		if *icon == "" && len(screenshots) == 0 && *tagline == "" && *short == "" && *description == "" && *supportEmail == "" {
+			return nil
+		}
 	}
 	return a.updateAppListing(ctx, api, appID, appListingChange{
 		icon: *icon, screenshots: screenshots,
