@@ -140,19 +140,9 @@ func (a *app) appListingUpdate(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if *category != "" {
-		// The category is an app setting, not part of the listing text.
-		if err := api.Do(ctx, http.MethodPut, "/apps/"+url.PathEscape(appID), map[string]any{"category_id": *category, "subcategory_id": *subcategory}, nil); err != nil {
-			return err
-		}
-		a.printf("Set the App Store category to %s / %s.\n", *category, *subcategory)
-		if *icon == "" && len(screenshots) == 0 && *tagline == "" && *short == "" && *description == "" && *supportEmail == "" {
-			return nil
-		}
-	}
 	return a.updateAppListing(ctx, api, appID, appListingChange{
 		icon: *icon, screenshots: screenshots,
-		text: map[string]string{"tagline": *tagline, "short_description": *short, "description": *description, "support_email": *supportEmail},
+		text: map[string]string{"tagline": *tagline, "short_description": *short, "description": *description, "support_email": *supportEmail, "category_id": *category, "subcategory_id": *subcategory},
 	})
 }
 
