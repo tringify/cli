@@ -96,9 +96,10 @@ func (a *app) appListingShow(ctx context.Context, args []string) error {
 }
 
 func (a *app) appListingUpdate(ctx context.Context, args []string) error {
-	fs := newFlags("app listing update [--app ID] [--icon FILE] [--screenshot FILE]... [--tagline T] [--description D] [--category ID --subcategory ID]", "Change the app's App Store listing. Only the parts you pass change. The icon is a 512×512 PNG, JPEG or WebP; passing --screenshot replaces all screenshots, in the order given. --category and --subcategory (see `tringify app categories`) place a standard app in the App Store; a sales channel app's category is set when it is created. The change reaches the App Store with the next `tringify app release` and `tringify app publish`.")
+	fs := newFlags("app listing update [--app ID] [--name NAME] [--icon FILE] [--screenshot FILE]... [--tagline T] [--description D] [--category ID --subcategory ID]", "Change the app's App Store listing. Only the parts you pass change. --name renames the app (its name in the App Store, Store Admin and the Developer Portal). The icon is a 512×512 PNG, JPEG or WebP; passing --screenshot replaces all screenshots, in the order given. --category and --subcategory (see `tringify app categories`) place a standard app in the App Store; a sales channel app's category is set when it is created. The change reaches the App Store with the next `tringify app release` and `tringify app publish`.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
+	name := fs.String("name", "", "the app's name")
 	icon := fs.String("icon", "", "app icon image, 512×512")
 	tagline := fs.String("tagline", "", "one-line tagline")
 	short := fs.String("short-description", "", "short description")
@@ -141,12 +142,13 @@ func (a *app) appListingUpdate(ctx context.Context, args []string) error {
 		return err
 	}
 	return a.updateAppListing(ctx, api, appID, appListingChange{
-		icon: *icon, screenshots: screenshots,
+		name: strings.TrimSpace(*name), icon: *icon, screenshots: screenshots,
 		text: map[string]string{"tagline": *tagline, "short_description": *short, "description": *description, "support_email": *supportEmail, "category_id": *category, "subcategory_id": *subcategory},
 	})
 }
 
 type appListingChange struct {
+	name        string
 	icon        string
 	screenshots []string
 	text        map[string]string
@@ -198,11 +200,21 @@ func (a *app) updateAppListing(ctx context.Context, api devAPIDoer, appID string
 		body["screenshot_file_ids"] = shots
 		changed = true
 	}
-	if !changed {
+	if !changed && change.name == "" {
 		return errors.New("nothing to change: pass at least one of the flags")
 	}
-	if err := api.Do(ctx, http.MethodPut, "/apps/"+url.PathEscape(appID)+"/listing", body, nil); err != nil {
-		return err
+	// The name belongs to the app's settings, which leave every field the
+	// request does not name unchanged.
+	if change.name != "" {
+		if err := api.Do(ctx, http.MethodPut, "/apps/"+url.PathEscape(appID), map[string]any{"name": change.name}, nil); err != nil {
+			return err
+		}
+		current["name"] = change.name
+	}
+	if changed {
+		if err := api.Do(ctx, http.MethodPut, "/apps/"+url.PathEscape(appID)+"/listing", body, nil); err != nil {
+			return err
+		}
 	}
 	a.printf("Updated the listing of %s. Release and publish the app to show it in the App Store:\n  tringify app release --app %s --bump patch --notes \"Listing update.\"\n  tringify app publish VERSION --app %s\n", str(current["name"]), appID, appID)
 	return nil
