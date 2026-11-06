@@ -110,18 +110,19 @@ An app whose scopes can read customer data (`read_customers`, `read_orders`, or 
 
 `tringify.app.json` holds everything a release carries except the listing (name, descriptions, icon, screenshots, support email), which you change with `tringify app listing update` or in the Developer Portal; `tringify app listing show` shows it and what it still needs before a marketplace submit. Pushing replaces the whole draft: a field you delete from the file is cleared. Stores only see a change once you release a version and publish it.
 
-### Privacy policy, terms and docs
+### Privacy policy, terms, docs and API reference
 
-Tringify hosts every app's privacy policy, terms of service and documentation at `https://apps-support.tringify.com/<app-handle>/privacy`, `/terms` and `/docs`. You write them in markdown; each change is reviewed and published as a numbered, dated version, and stores that installed the app are notified of a new privacy policy or terms version. The top of the privacy policy, what the app can access, is written by the platform from the app's current release. A marketplace app needs a published privacy policy and terms before its listing can be submitted.
+Tringify hosts every app's privacy policy, terms of service and documentation at `https://apps-support.tringify.com/<app-handle>/privacy`, `/terms` and `/docs`. If your app offers an API, its reference is hosted there too, at `/api`, and only there. These documents are English only. App support is by email: the support email on your listing. You write them in markdown; each change is reviewed and published as a numbered, dated version, and stores that installed the app are notified of a new privacy policy or terms version. The top of the privacy policy, what the app can access, is written by the platform from the app's current release. A marketplace app needs a published privacy policy and terms before its listing can be submitted.
 
 ```sh
 tringify app privacy push --submit      # privacy.md
 tringify app terms push --submit        # terms.md
 tringify app docs push --submit         # docs/*.md, one page each
+tringify app api push --submit          # api/*.md, one page each
 tringify app privacy status             # draft, review, published version and its URL
 ```
 
-Each docs page starts with front matter; the file name without `.md` is the page's address, and the first page is the docs home:
+Each docs or API reference page starts with front matter; the file name without `.md` is the page's address, and the first page is the home page:
 
 ```markdown
 ---
@@ -208,7 +209,8 @@ tringify app block preview --theme ../my-theme --page collection
 | `app privacy push [--file privacy.md] [--submit]` | Saves the markdown file as the draft of the app's privacy policy on its Tringify support site. With `--submit` it is also submitted for review; once approved it is published as a new version and stores that installed the app are notified. |
 | `app terms push [--file terms.md] [--submit]` | The same for the app's terms of service. |
 | `app docs push [--dir docs] [--submit]` | Saves every `.md` file directly in the folder as one page of the app's documentation, ordered by the `order` in its front matter, then by file name. |
-| `app privacy status`, `app terms status`, `app docs status` | Shows the public URL, the published version with its date, URL and whether the support site has it yet, the submission in review, the draft, and the last review decision with its note. |
+| `app api push [--dir api] [--submit]` | The same for the app's API reference, served at `/api`. |
+| `app privacy status`, `app terms status`, `app docs status`, `app api status` | Shows the public URL, the published version with its date, URL and whether the support site has it yet, the submission in review, the draft, and the last review decision with its note. |
 | `app webhook test` | Sends a signed `app.test` webhook to the app's webhook URL and reports what your endpoint answered. |
 | `app webhook rotate-key [--pipe-to COMMAND \| --json]` | Issues a new webhook signing secret and prints it once. For 72 hours, requests also carry a second signature made with the previous secret (`X-Tringify-Signature: t=…,v1=<new>,v1=<previous>`), so your app keeps verifying while you deploy the new one; the output says exactly when signatures made with the previous secret stop. Rotating again during those 72 hours stops signatures made with the oldest secret at once. `--pipe-to` stores it without printing it, as for `app secret rotate`; `--json` includes `previous_key_expires_at` (`null` when the app had no secret before). |
 | `app webhook finish-rotation [--app ID] [--yes]` | Stops signing requests with the previous webhook signing secret now instead of when its 72 hours end. Run it once the new secret is deployed everywhere you verify signatures. Asks first; `--yes` skips the question. |

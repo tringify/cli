@@ -72,6 +72,8 @@ Apps:
   app terms status      Show the terms of service's draft, review and published version
   app docs push         Save docs/*.md as the draft documentation (--submit to send it for review)
   app docs status       Show the documentation's draft, review and published version
+  app api push          Save api/*.md as the draft API reference (--submit to send it for review)
+  app api status        Show the API reference's draft, review and published version
   app publish VERSION   Publish an approved version
   app webhook test      Send a test webhook to the app's webhook URL
   app webhook rotate-key Issue a new webhook signing secret; requests are also signed with the previous one for 72 hours

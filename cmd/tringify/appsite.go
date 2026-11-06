@@ -84,7 +84,7 @@ type appSite struct {
 	Documents map[string]siteDocument `json:"documents"`
 }
 
-// appSiteCommand runs `tringify app privacy|terms|docs push|status`.
+// appSiteCommand runs `tringify app privacy|terms|docs|api push|status`.
 func (a *app) appSiteCommand(ctx context.Context, kind string, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
@@ -97,7 +97,11 @@ func (a *app) appSiteCommand(ctx context.Context, kind string, args []string) er
 	return fmt.Errorf("usage: tringify app %s push|status", kind)
 }
 
-var siteKindNames = map[string]string{"privacy": "privacy policy", "terms": "terms of service", "docs": "documentation"}
+var siteKindNames = map[string]string{"privacy": "privacy policy", "terms": "terms of service", "docs": "documentation", "api": "API reference"}
+
+// sitePaged reports whether a kind is a folder of ordered pages (the docs and
+// the API reference) rather than one markdown file.
+func sitePaged(kind string) bool { return kind == "docs" || kind == "api" }
 
 func (a *app) fetchSite(ctx context.Context, appID string) (*appSite, error) {
 	var site appSite
@@ -121,6 +125,11 @@ func (a *app) appSitePush(ctx context.Context, kind string, args []string) error
 	usage, summary, sourceFlag, sourceDefault, sourceHelp := "app "+kind+" push [--file "+kind+".md] [--submit] [--app ID]",
 		"Save a markdown file as the draft of the app's "+name+" on its Tringify support site. With --submit the draft is also submitted for review; once approved, it is published as the new version and stores that installed the app are notified.",
 		"file", kind+".md", "markdown file"
+	if kind == "api" {
+		usage, summary, sourceFlag, sourceDefault, sourceHelp = "app api push [--dir api] [--submit] [--app ID]",
+			"Save the api/*.md files as the draft of your app's API reference on its Tringify support site. If your app offers an API, its reference is hosted there, and only there. Each file is one page: its name without .md is the page's address (lowercase letters, numbers and hyphens), and it starts with front matter giving the title and, optionally, the position:\n\n  ---\n  title: Authentication\n  order: 1\n  ---\n\nPages are ordered by order, then by file name; the first is the reference's home page. Only the .md files directly in the folder are pushed. With --submit the draft is also submitted for review; once approved, it is published as the new version.",
+			"dir", "api", "folder of markdown pages"
+	}
 	if kind == "docs" {
 		usage, summary, sourceFlag, sourceDefault, sourceHelp = "app docs push [--dir docs] [--submit] [--app ID]",
 			"Save the docs/*.md files as the draft of the app's documentation on its Tringify support site. Each file is one page: its name without .md is the page's address (lowercase letters, numbers and hyphens), and it starts with front matter giving the title and, optionally, the position:\n\n  ---\n  title: Getting started\n  order: 1\n  ---\n\nPages are ordered by order, then by file name; the first is the docs home. Only the .md files directly in the folder are pushed. With --submit the draft is also submitted for review; once approved, it is published as the new version.",
@@ -147,7 +156,7 @@ func (a *app) appSitePush(ctx context.Context, kind string, args []string) error
 		return errors.New("the Developer API did not say which language the content is in")
 	}
 	var content siteLocale
-	if kind == "docs" {
+	if sitePaged(kind) {
 		pages, err := readDocsPages(*source, limits)
 		if err != nil {
 			return err
@@ -167,7 +176,7 @@ func (a *app) appSitePush(ctx context.Context, kind string, args []string) error
 		}
 		a.warnImages(*source, content.BodyMarkdown, limits.ImageHosts)
 	}
-	if kind == "docs" {
+	if sitePaged(kind) {
 		for _, page := range content.Pages {
 			a.warnImages(filepath.Join(*source, page.Slug+".md"), page.BodyMarkdown, limits.ImageHosts)
 		}
@@ -199,7 +208,8 @@ func (a *app) appSitePush(ctx context.Context, kind string, args []string) error
 	return nil
 }
 
-// readDocsPages reads the pages of a docs folder in their order, checked
+// readDocsPages reads the pages of a docs or API reference folder in their
+// order, checked
 // against the server's limits.
 func readDocsPages(dir string, limits siteLimits) ([]sitePage, error) {
 	slugPattern, err := regexp.Compile(limits.PageSlugPattern)
@@ -214,7 +224,7 @@ func readDocsPages(dir string, limits siteLimits) ([]sitePage, error) {
 		return nil, fmt.Errorf("no .md files in %s", dir)
 	}
 	if len(files) > limits.DocsMaxPages {
-		return nil, fmt.Errorf("%s has %d pages; the documentation can have at most %d", dir, len(files), limits.DocsMaxPages)
+		return nil, fmt.Errorf("%s has %d pages; at most %d are allowed", dir, len(files), limits.DocsMaxPages)
 	}
 	type orderedPage struct {
 		page  sitePage
@@ -249,7 +259,7 @@ func readDocsPages(dir string, limits siteLimits) ([]sitePage, error) {
 		pages = append(pages, orderedPage{sitePage{Slug: slug, Title: title, BodyMarkdown: body}, order})
 	}
 	if total > limits.DocsTotalMaxChars {
-		return nil, fmt.Errorf("the pages in %s have %d characters together; the documentation can have at most %d", dir, total, limits.DocsTotalMaxChars)
+		return nil, fmt.Errorf("the pages in %s have %d characters together; at most %d are allowed", dir, total, limits.DocsTotalMaxChars)
 	}
 	sort.SliceStable(pages, func(i, j int) bool {
 		if pages[i].order != pages[j].order {
