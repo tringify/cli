@@ -47,6 +47,7 @@ Themes:
   theme create          Create a free theme listing
   theme update          Change a listing's text, category, screenshots and style covers
   theme categories      List the Theme Store categories
+  theme docs            Publish the theme's documentation from markdown files
   theme submit          Submit a listing for Theme Store review
   theme publish         Publish the theme as a new version of a listing
 
@@ -212,6 +213,8 @@ func (a *app) theme(ctx context.Context, args []string) error {
 		return a.themeSubmit(ctx, args[1:])
 	case "categories":
 		return a.themeCategories(ctx, args[1:])
+	case "docs":
+		return a.themeDocs(ctx, args[1:])
 	}
 	return fmt.Errorf("unknown theme command %q", args[0])
 }
