@@ -203,10 +203,10 @@ func (a *app) updateAppListing(ctx context.Context, api devAPIDoer, appID string
 	if !changed && change.name == "" {
 		return errors.New("nothing to change: pass at least one of the flags")
 	}
-	// The name belongs to the app's settings, which leave every field the
-	// request does not name unchanged.
+	// The name is changed on its own route, which leaves every other app
+	// setting as it is.
 	if change.name != "" {
-		if err := api.Do(ctx, http.MethodPut, "/apps/"+url.PathEscape(appID), map[string]any{"name": change.name}, nil); err != nil {
+		if err := api.Do(ctx, http.MethodPut, "/apps/"+url.PathEscape(appID)+"/name", map[string]any{"name": change.name}, nil); err != nil {
 			return err
 		}
 		current["name"] = change.name
