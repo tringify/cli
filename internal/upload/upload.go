@@ -71,9 +71,10 @@ func Put(ctx context.Context, client *http.Client, grant Grant, path string) err
 	return nil
 }
 
-// Wait polls until the upload is ready or rejected.
+// Wait polls until the upload is ready or rejected. A large theme (tens of
+// MB of images) can take several minutes to validate, so it waits up to 15.
 func Wait(ctx context.Context, poll func(context.Context) (*Status, error)) (string, error) {
-	deadline := time.Now().Add(5 * time.Minute)
+	deadline := time.Now().Add(15 * time.Minute)
 	delay := time.Second
 	for {
 		s, err := poll(ctx)
