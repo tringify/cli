@@ -71,7 +71,7 @@ func (a *app) themeCategories(ctx context.Context, args []string) error {
 }
 
 func (a *app) themeUpdate(ctx context.Context, args []string) error {
-	fs := newFlags("theme update --listing ID [--tagline T] [--description D] [--category SLUG] [--screenshot FILE]... [--style-cover STYLE=FILE]...", "Change a listing's text, category, links, screenshots and style covers. Only the parts you pass change. Screenshots and covers are 1280×720 PNG, JPEG or WebP; passing --screenshot replaces all screenshots, in the order given, and passing --style-cover replaces all covers.")
+	fs := newFlags("theme update --listing ID [--tagline T] [--description D] [--category SLUG] [--screenshot FILE]... [--style-cover STYLE=FILE]... [--hero FILE] [--style-hero STYLE=FILE]...", "Change a listing's text, category, links, screenshots, style covers and hero images. Only the parts you pass change. Screenshots and covers are 1280×720 PNG, JPEG or WebP; passing --screenshot replaces all screenshots, in the order given, and passing --style-cover replaces all covers. Hero images are the tall pictures the Theme Store hero shows for a featured theme: 1200×1500 (4:5); --hero sets the theme's own, --style-hero one style's (the style needs a cover).")
 	listing := fs.String("listing", "", "theme listing ID (see `tringify theme listings`)")
 	name := fs.String("name", "", "new listing name")
 	tagline := fs.String("tagline", "", "one-line tagline")
@@ -80,7 +80,9 @@ func (a *app) themeUpdate(ctx context.Context, args []string) error {
 	category := fs.String("category", "", "category slug or ID (see `tringify theme categories`)")
 	support := fs.String("support-url", "", "where merchants get help")
 	terms := fs.String("terms-url", "", "terms of use page")
-	var screenshots, covers stringList
+	var screenshots, covers, styleHeroes stringList
+	hero := fs.String("hero", "", "the theme's own hero image (1200×1500) for the Theme Store hero")
+	fs.Var(&styleHeroes, "style-hero", "a style's hero image as STYLE=FILE; repeat for each style")
 	fs.Var(&screenshots, "screenshot", "screenshot image; repeat for each, in display order")
 	fs.Var(&covers, "style-cover", "a style's cover as STYLE=FILE, where STYLE is the preset name; repeat for each style")
 	if _, err := parse(fs, args); err != nil {
@@ -97,7 +99,22 @@ func (a *app) themeUpdate(ctx context.Context, args []string) error {
 		*description = strings.TrimSpace(string(raw))
 	}
 	type cover struct{ name, path string }
-	var coverList []cover
+	var coverList, heroList []cover
+	if *hero != "" {
+		heroList = append(heroList, cover{"", *hero})
+	}
+	for _, h := range styleHeroes {
+		style, path, ok := strings.Cut(h, "=")
+		if !ok || strings.TrimSpace(style) == "" || path == "" {
+			return fmt.Errorf("--style-hero %q must be STYLE=FILE", h)
+		}
+		heroList = append(heroList, cover{strings.TrimSpace(style), path})
+	}
+	for _, h := range heroList {
+		if _, err := mediaType(h.path); err != nil {
+			return err
+		}
+	}
 	for _, c := range covers {
 		style, path, ok := strings.Cut(c, "=")
 		if !ok || strings.TrimSpace(style) == "" || path == "" {
@@ -135,16 +152,27 @@ func (a *app) themeUpdate(ctx context.Context, args []string) error {
 	if ids, ok := current["screenshot_file_ids"].([]any); ok && len(ids) > 0 {
 		body["screenshot_file_ids"] = ids
 	}
-	if covers, ok := current["style_covers"].([]any); ok && len(covers) > 0 {
-		var keep []map[string]string
+	var keep []map[string]string
+	if covers, ok := current["style_covers"].([]any); ok {
 		for _, c := range covers {
-			if m, ok := c.(map[string]any); ok && str(m["name"]) != "" && str(m["file_id"]) != "" {
-				keep = append(keep, map[string]string{"name": str(m["name"]), "file_id": str(m["file_id"])})
+			m, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			entry := map[string]string{"name": str(m["name"])}
+			if v := str(m["file_id"]); v != "" {
+				entry["file_id"] = v
+			}
+			if v := str(m["hero_file_id"]); v != "" {
+				entry["hero_file_id"] = v
+			}
+			if (entry["name"] != "" && entry["file_id"] != "") || (entry["name"] == "" && entry["hero_file_id"] != "") {
+				keep = append(keep, entry)
 			}
 		}
-		if len(keep) > 0 {
-			body["style_covers"] = keep
-		}
+	}
+	if len(keep) > 0 {
+		body["style_covers"] = keep
 	}
 	changed := false
 	for key, v := range map[string]string{"name": *name, "tagline": *tagline, "description": *description, "support_url": *support, "terms_url": *terms} {
@@ -182,7 +210,47 @@ func (a *app) themeUpdate(ctx context.Context, args []string) error {
 			}
 			list = append(list, map[string]string{"name": c.name, "file_id": id})
 		}
+		// a new set of covers keeps the heroes already given (the theme's own and each style's still present)
+		for _, k := range keep {
+			if k["hero_file_id"] == "" {
+				continue
+			}
+			found := false
+			for _, e := range list {
+				if e["name"] == k["name"] {
+					e["hero_file_id"] = k["hero_file_id"]
+					found = true
+				}
+			}
+			if !found && k["name"] == "" {
+				list = append([]map[string]string{{"name": "", "hero_file_id": k["hero_file_id"]}}, list...)
+			}
+		}
 		body["style_covers"] = list
+		keep = list
+		changed = true
+	}
+	if len(heroList) > 0 {
+		for _, h := range heroList {
+			id, err := a.uploadListingMedia(ctx, api, h.path)
+			if err != nil {
+				return err
+			}
+			found := false
+			for _, e := range keep {
+				if e["name"] == h.name {
+					e["hero_file_id"] = id
+					found = true
+				}
+			}
+			if !found {
+				if h.name != "" {
+					return fmt.Errorf("--style-hero %q: the style has no cover yet; add one with --style-cover", h.name)
+				}
+				keep = append([]map[string]string{{"name": "", "hero_file_id": id}}, keep...)
+			}
+		}
+		body["style_covers"] = keep
 		changed = true
 	}
 	if !changed {
