@@ -232,7 +232,7 @@ func (a *app) themeUpdate(ctx context.Context, args []string) error {
 	}
 	if len(heroList) > 0 {
 		for _, h := range heroList {
-			id, err := a.uploadListingMedia(ctx, api, h.path)
+			id, err := a.uploadListingHero(ctx, api, h.path)
 			if err != nil {
 				return err
 			}
@@ -317,6 +317,11 @@ func mediaType(path string) (string, error) {
 // uploadListingMedia uploads one theme listing image and returns its file ID.
 func (a *app) uploadListingMedia(ctx context.Context, api devAPIDoer, path string) (string, error) {
 	return a.uploadMedia(ctx, api, path, "/org/themes/media/upload-intents", nil)
+}
+
+// uploadListingHero uploads one theme listing hero picture (1200×1500) and returns its file ID.
+func (a *app) uploadListingHero(ctx context.Context, api devAPIDoer, path string) (string, error) {
+	return a.uploadMedia(ctx, api, path, "/org/themes/media/upload-intents", map[string]any{"category": "theme_hero"})
 }
 
 // uploadMedia uploads one image through an upload-intent endpoint (base, with
