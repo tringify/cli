@@ -183,8 +183,9 @@ func (a *app) themeContract(ctx context.Context, args []string) error {
 }
 
 func (a *app) themeContext(ctx context.Context, args []string) error {
-	fs := newFlags("theme context [DIR] [--page PAGE] [--entity HANDLE] [--preset NAME]", "Print the exact sample data (CTX) the preview gives one page.")
+	fs := newFlags("theme context [DIR] [--page PAGE] [--state STATE] [--entity HANDLE] [--preset NAME]", "Print the exact sample data (CTX) the preview gives one page.")
 	page := fs.String("page", "home", "template page type")
+	state := fs.String("state", "", "gate page state: default, ok, invalid_email, consent_required, required, incorrect, retry_later or unavailable")
 	entity := fs.String("entity", "", "product, collection, article, or page handle (default: the first in the demo pack)")
 	preset := fs.String("preset", "", "theme style preset name")
 	renderer := fs.String("renderer", "", rendererHelp)
@@ -197,7 +198,7 @@ func (a *app) themeContext(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	payload, err := themebuild.InspectContext(ctx, root, *page, *entity, *preset, a.tools(*checker, *renderer))
+	payload, err := themebuild.InspectContext(ctx, root, *page, *state, *entity, *preset, a.tools(*checker, *renderer))
 	if err != nil {
 		return fmt.Errorf("theme context failed: %w", err)
 	}
@@ -244,10 +245,6 @@ func (a *app) themePackage(ctx context.Context, args []string) error {
 	case len(positional) == 2:
 		*output = positional[1]
 		positional = positional[:1]
-	case len(positional) == 1 && *output == "" && strings.EqualFold(filepath.Ext(positional[0]), ".zip"):
-		// The theme tools form: package OUTPUT, from the current directory.
-		*output = positional[0]
-		positional = nil
 	}
 	root, err := rootArg(positional)
 	if err != nil {
