@@ -1,4 +1,4 @@
-name: test
+name: check
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
 # Linux runners only: macOS and Windows binaries are cross-compiled and
 # type-checked from Linux, so no macOS or Windows minutes are used.
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

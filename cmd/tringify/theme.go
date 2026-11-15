@@ -14,9 +14,9 @@ import (
 
 	"github.com/tringify/cli/internal/auth"
 	"github.com/tringify/cli/internal/devapi"
-	"github.com/tringify/cli/internal/pyjson"
 	"github.com/tringify/cli/internal/themebinaries"
 	"github.com/tringify/cli/internal/themebuild"
+	"github.com/tringify/cli/internal/themejson"
 	"github.com/tringify/cli/internal/themeops"
 	"github.com/tringify/cli/internal/upload"
 )
@@ -178,7 +178,7 @@ func (a *app) themeContract(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("theme contract failed: %w", err)
 	}
-	a.println(pyjson.DumpsUnicode(contract))
+	a.println(themejson.DumpsUnicode(contract))
 	return nil
 }
 
@@ -201,7 +201,7 @@ func (a *app) themeContext(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("theme context failed: %w", err)
 	}
-	a.println(pyjson.DumpsUnicode(payload))
+	a.println(themejson.DumpsUnicode(payload))
 	return nil
 }
 

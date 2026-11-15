@@ -14,7 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/tringify/cli/internal/pyjson"
+	"github.com/tringify/cli/internal/themejson"
 )
 
 // SourceExt is the extension of compiled Vascula sections.
@@ -30,7 +30,7 @@ func readText(root, path string) (string, error) {
 	if !utf8.Valid(data) {
 		return "", utf8Error(data)
 	}
-	return pyjson.NormalizeNewlines(string(data)), nil
+	return themejson.NormalizeNewlines(string(data)), nil
 }
 
 func utf8Error(data []byte) error {
@@ -53,13 +53,13 @@ func utf8Error(data []byte) error {
 }
 
 // readJSON reads a JSON file, naming the file, line and column on error.
-func readJSON(path, root string) (pyjson.Value, error) {
+func readJSON(path, root string) (themejson.Value, error) {
 	text, err := readText(root, path)
 	if err != nil {
 		return nil, err
 	}
-	v, err := pyjson.Loads(text)
-	var de *pyjson.DecodeError
+	v, err := themejson.Loads(text)
+	var de *themejson.DecodeError
 	if errors.As(err, &de) {
 		return nil, fmt.Errorf("%s:%d:%d: %s", rel(root, path), de.Line, de.Column, de.Msg)
 	}
@@ -114,34 +114,34 @@ func Build(root string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	manifest, ok := manifestValue.(*pyjson.Object)
-	var entries []pyjson.Value
+	manifest, ok := manifestValue.(*themejson.Object)
+	var entries []themejson.Value
 	if ok {
 		sections, present := manifest.Get("sections")
 		if !present {
-			entries = []pyjson.Value{}
-		} else if entries, ok = sections.([]pyjson.Value); !ok {
+			entries = []themejson.Value{}
+		} else if entries, ok = sections.([]themejson.Value); !ok {
 			ok = false
 		}
 	}
 	if !ok {
 		return nil, errors.New("theme.json must contain a sections list")
 	}
-	index := map[string]*pyjson.Object{}
+	index := map[string]*themejson.Object{}
 	for _, e := range entries {
-		obj, isObj := e.(*pyjson.Object)
+		obj, isObj := e.(*themejson.Object)
 		if !isObj {
 			return nil, errors.New("theme.json sections must be named objects")
 		}
 		name, isStr := obj.Get("name")
-		if _, s := name.(pyjson.String); !isStr || !s {
+		if _, s := name.(themejson.String); !isStr || !s {
 			return nil, errors.New("theme.json sections must be named objects")
 		}
 	}
 	for _, e := range entries {
-		obj := e.(*pyjson.Object)
+		obj := e.(*themejson.Object)
 		name, _ := obj.Get("name")
-		index[string(name.(pyjson.String))] = obj
+		index[string(name.(themejson.String))] = obj
 	}
 	if len(index) != len(entries) {
 		return nil, errors.New("theme.json contains duplicate section names")
@@ -154,20 +154,20 @@ func Build(root string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		state, ok := stateValue.(*pyjson.Object)
-		var sections *pyjson.Object
+		state, ok := stateValue.(*themejson.Object)
+		var sections *themejson.Object
 		if ok {
 			version, _ := state.Get("version")
 			s, _ := state.Get("sections")
-			sections, ok = s.(*pyjson.Object)
-			ok = ok && pyjson.IsInt(version, 1)
+			sections, ok = s.(*themejson.Object)
+			ok = ok && themejson.IsInt(version, 1)
 		}
 		if !ok {
 			return nil, errors.New("invalid generated-section ownership file")
 		}
 		for _, name := range sections.Keys() {
 			digest, _ := sections.Get(name)
-			d, isStr := digest.(pyjson.String)
+			d, isStr := digest.(themejson.String)
 			if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) || !isStr {
 				return nil, errors.New("invalid generated-section ownership entry")
 			}
@@ -189,7 +189,7 @@ func Build(root string) ([]string, error) {
 
 	var built []string
 	outputs := map[string]string{}
-	var generated []pyjson.Value
+	var generated []themejson.Value
 	for _, name := range names {
 		sourceDir := filepath.Join(sourceRoot, name)
 		if isSymlink(sourceDir) {
@@ -212,28 +212,28 @@ func Build(root string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		schema, ok := schemaValue.(*pyjson.Object)
+		schema, ok := schemaValue.(*themejson.Object)
 		if !ok {
 			return nil, fmt.Errorf("%s: schema must be an object", name)
 		}
-		if schemaName, _ := schema.Get("name"); !pyjson.Equal(schemaName, pyjson.String(name)) {
+		if schemaName, _ := schema.Get("name"); !themejson.Equal(schemaName, themejson.String(name)) {
 			return nil, fmt.Errorf("%s: schema name must match the section directory", name)
 		}
 		outputs[name] = "<style>\n" + sharedCSS + "\n" + pyStrip(style) + "\n</style>\n" + pyStrip(body) + "\n" +
-			"{% schema %}\n" + pyjson.Dumps(schema) + "\n{% endschema %}\n"
-		entry := pyjson.NewObject()
+			"{% schema %}\n" + themejson.Dumps(schema) + "\n{% endschema %}\n"
+		entry := themejson.NewObject()
 		if existing, ok := index[name]; ok {
 			entry = existing.Copy()
 		}
 		kind, ok := schema.Get("kind")
 		if !ok {
-			kind = pyjson.String("section")
+			kind = themejson.String("section")
 		}
-		entry.Set("name", pyjson.String(name))
+		entry.Set("name", themejson.String(name))
 		entry.Set("kind", kind)
-		entry.Set("file", pyjson.String("sections/"+name+SourceExt))
-		entry.Set("origin", pyjson.String("override"))
-		if target, _ := schema.Get("target"); pyjson.Truthy(target) {
+		entry.Set("file", themejson.String("sections/"+name+SourceExt))
+		entry.Set("origin", themejson.String("override"))
+		if target, _ := schema.Get("target"); themejson.Truthy(target) {
 			entry.Set("target", target)
 		} else {
 			entry.Delete("target")
@@ -283,27 +283,27 @@ func Build(root string) ([]string, error) {
 	for _, name := range stale {
 		isStale[name] = true
 	}
-	sections := []pyjson.Value{}
+	sections := []themejson.Value{}
 	for _, e := range entries {
-		name, _ := e.(*pyjson.Object).Get("name")
-		n := string(name.(pyjson.String))
+		name, _ := e.(*themejson.Object).Get("name")
+		n := string(name.(themejson.String))
 		if _, built := outputs[n]; !built && !isStale[n] {
 			sections = append(sections, e)
 		}
 	}
 	sections = append(sections, generated...)
 	manifest.Set("sections", sections)
-	if err := os.WriteFile(manifestPath, []byte(pyjson.Dumps(manifest)+"\n"), 0o666); err != nil {
+	if err := os.WriteFile(manifestPath, []byte(themejson.Dumps(manifest)+"\n"), 0o666); err != nil {
 		return nil, osError(root, err)
 	}
-	owned := pyjson.NewObject()
+	owned := themejson.NewObject()
 	for _, name := range built {
-		owned.Set(name, pyjson.String(sha256Hex([]byte(outputs[name]))))
+		owned.Set(name, themejson.String(sha256Hex([]byte(outputs[name]))))
 	}
-	state := pyjson.NewObject()
-	state.Set("version", pyjson.Int("1"))
+	state := themejson.NewObject()
+	state.Set("version", themejson.Int("1"))
 	state.Set("sections", owned)
-	if err := os.WriteFile(ownershipPath, []byte(pyjson.Dumps(state)+"\n"), 0o666); err != nil {
+	if err := os.WriteFile(ownershipPath, []byte(themejson.Dumps(state)+"\n"), 0o666); err != nil {
 		return nil, osError(root, err)
 	}
 	if built == nil {

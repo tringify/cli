@@ -1,12 +1,13 @@
-// Package pyjson reads and writes JSON the way Python's json module does.
+// Package themejson reads and writes theme files (theme.json, section
+// schemas, sample data) in the one JSON format every Tringify theme uses.
 //
-// Theme files were written by the original Python theme tools, and authors
-// keep them in version control. Rewriting theme.json or a compiled section
-// must therefore produce byte-for-byte what json.dumps produced: object keys
-// keep their order, integers keep every digit, floats use Python's repr, and
-// non-ASCII text is escaped unless asked otherwise. Parse errors carry the
-// same messages and positions, so a theme author sees the same diagnostics.
-package pyjson
+// Authors keep these files in version control, so rewriting one must change
+// only what changed: object keys keep their order, integers keep every digit,
+// floats are written in their shortest round-trip form, and non-ASCII text is
+// escaped unless asked otherwise. The format, the str/repr/== helpers and the
+// parse error messages follow Python's json module, which the theme format was
+// first defined with.
+package themejson
 
 import (
 	"fmt"
@@ -516,7 +517,7 @@ func encode(b *strings.Builder, v Value, o Options, level int) {
 		newline(level)
 		b.WriteByte('}')
 	default:
-		panic(fmt.Sprintf("pyjson: unsupported value %T", v))
+		panic(fmt.Sprintf("themejson: unsupported value %T", v))
 	}
 }
 

@@ -12,7 +12,7 @@ macOS and Linux:
 curl -fsSL https://raw.githubusercontent.com/tringify/cli/main/install.sh | sh
 ```
 
-The script downloads the release for your platform, checks it against the published `SHA256SUMS`, and installs `tringify` in `~/.local/bin`. Set `TRINGIFY_CLI_VERSION` to install a specific release.
+The script downloads the release for your platform, checks it against the published `SHA256SUMS`, and installs `tringify` in `~/.local/bin`. Set `TRINGIFY_CLI_VERSION` to install a specific release, or `TRINGIFY_CLI_BIN` to install into another directory.
 
 Windows (PowerShell):
 
@@ -24,7 +24,7 @@ The script checks the download against `SHA256SUMS`, installs `tringify.exe` in 
 
 Builds are available for macOS (Apple silicon and Intel), Linux (x86-64 and ARM64), and Windows (x86-64; Windows on Arm runs it too). To build from source: `go install github.com/tringify/cli/cmd/tringify@latest`.
 
-The CLI is a single binary and needs nothing else installed: no Python, Node.js or other runtime. The first time you check, package or preview a theme, or check or preview app blocks, it downloads the theme validator (`themecheck`) and preview renderer (`theme-preview-render`) from the [theme tools](https://github.com/tringify/theme-tools) release for your platform, verifies them against the release's `SHA256SUMS`, and keeps them in your user cache directory.
+The CLI is a single binary. For themes it needs nothing else installed (no Python, Node.js or other runtime), except git to publish a version. An app project from `tringify app init` is a TypeScript Cloudflare Worker, so building and running it needs Node.js and npm. The first time you check, package or preview a theme, or check or preview app blocks, it downloads the theme validator (`themecheck`) and preview renderer (`theme-preview-render`) from the [theme tools](https://github.com/tringify/theme-tools) release for your platform, verifies them against the release's `SHA256SUMS`, and keeps them in your user cache directory.
 
 | System | Location |
 | --- | --- |
@@ -66,13 +66,14 @@ tringify theme diff --listing LISTING_ID       # what changes compared with the 
 tringify theme publish --listing LISTING_ID --version 1.0.0 --notes "First release"
 ```
 
-Create the listing first, with `tringify theme create` (a free listing) or in the [Developer Portal](https://dev.tringify.com) under **Themes**, describe it with `tringify theme update`, and send it for review with `tringify theme submit`:
+Create the listing first, with `tringify theme create` (a free listing) or in the [Developer Portal](https://dev.tringify.com) under **Themes**, and describe it with `tringify theme update`. Publishing a version does not list the theme in the Theme Store: once the listing and a published version are ready, send them for review with `tringify theme submit`. An approved listing appears in the Theme Store.
 
 ```sh
 tringify theme create --name "Aurora" --slug aurora --support-url https://example.com/help
 tringify theme categories
 tringify theme update --listing LISTING_ID --tagline "Bold, image-led layouts" --category CATEGORY \
   --screenshot home.png --screenshot product.png
+tringify theme publish --listing LISTING_ID --version 1.0.0 --notes "First release"
 tringify theme submit --listing LISTING_ID
 ```
 
@@ -177,6 +178,8 @@ tringify app block preview --theme ../my-theme --page collection
 | `theme package [DIR] [OUTPUT]` | Builds in a temporary copy, validates, and writes an upload-ready ZIP (default `dist/<theme>.zip`; `--output FILE` also works). A failed validation never replaces an existing package. |
 | `theme context [DIR] --page PAGE [--entity HANDLE] [--preset NAME]` | Prints the exact sample data (CTX) the preview gives a page, such as `home`, `product`, `collection` or `page`. |
 | `theme contract` | Prints the theme author contract as JSON: CTX roots and fields, editor setting types and hosted form actions. |
+| `theme components [DIR] [--check]` | Copies the shared storefront components (the date picker and the account tabs) into the section sources that mark their place with `{%- comment -%}tf:shared NAME{%- endcomment -%}{%- comment -%}/tf:shared NAME{%- endcomment -%}`. Run `theme build` afterwards. `--check` changes nothing and fails when a section is out of date. |
+| `theme reference [DIR]` | Writes the theme's reference pages (`docs/ref-*.md`: theme settings, styles, page templates, sections and blocks) from the built theme and the descriptions in `docs-src/descriptions.json`, ready for `theme docs`. Every other `.md` file in `docs/` is left alone. Fails when a section, block or style has no description. |
 | `theme push --store ID [--storefront ID] [DIR]` | Packages the theme and adds it to the store as a new, unpublished theme. The live theme is not changed. |
 | `theme dev --store ID [--storefront ID] [--theme ID] [--with-demo] [DIR]` | Adds the theme to the store as an unpublished theme, then builds, validates and syncs it every time you save. The theme it uses is remembered in `.tringify/dev.json`; add `.tringify/` to your `.gitignore`. With `--theme` it syncs into that unpublished theme instead, such as a duplicate made in Store Admin; the default theme is refused. The store's published theme is never changed. `--with-demo` also adds the products and collections from `demo/catalog.json` to a development store. Products and collections the store already has are skipped, and only the images of the ones it adds are uploaded. |
 | `theme pull --store ID --theme ID [DIR]` | Downloads a store theme's published files into a new directory. Without `--theme` it lists the storefront's themes. |
@@ -190,7 +193,7 @@ tringify app block preview --theme ../my-theme --page collection
 | `theme docs --listing ID [DIR]` | Publishes the theme's documentation on `themes-support.tringify.com/<slug>/docs` from the `.md` files in DIR (default `./docs`), in the same format as `app docs push`: one file per page, the file name is the page address, front matter gives `title` and `order`. Saves the draft and submits it; Tringify reviews it before it goes live (Tringify's own themes publish at once). `--draft` only saves the draft; `theme docs status --listing ID` shows what is published, submitted and drafted. |
 | `theme update --listing ID [--name N] [--tagline T] [--description D \| --description-file FILE] [--category SLUG] [--support-url URL] [--terms-url URL] [--screenshot FILE]... [--hero FILE] [--style-hero STYLE=FILE]... [--style-cover STYLE=FILE]...` | Changes a listing's text, category, links, screenshots and style covers; only the parts you pass change. Screenshots and covers are 1280×720 PNG, JPEG or WebP. Passing `--screenshot` replaces all screenshots, in the order given; passing `--style-cover` replaces all covers, where `STYLE` is the style preset name. |
 | `theme submit --listing ID` | Submits the listing for Theme Store review. |
-| `theme publish --listing ID --version X.Y.Z [--notes TEXT] [--breaking] [--install-store ID] [--yes] [DIR]` | Packages the theme, shows what changes compared with the newest published version, and publishes it as a new version of the listing once you confirm. Pass `--yes` to skip the question, for example in CI. |
+| `theme publish --listing ID --version X.Y.Z [--notes TEXT] [--breaking] [--install-store ID] [--yes] [DIR]` | Packages the theme, shows what changes compared with the newest published version, and publishes it as a new version of the listing once you confirm. Pass `--yes` to skip the question. |
 | `app list` | Lists your organization's apps and their IDs. |
 | `app create --name NAME [--handle HANDLE] --type standard\|sales_channel --distribution private\|marketplace [--category ID --subcategory ID] [--description TEXT] [--json]` | Creates an app and prints its app ID, handle, client ID and client secret. The handle is made from the name unless you choose it with `--handle`; it is checked before the app is created and cannot change later. The secret is shown only in this output; to issue a new one, run `app secret rotate`. Sales channel apps need a category and subcategory, which set the channel type. With `--json` the result is JSON, for scripts and piping into a secret store. |
 | `app categories [--type standard\|sales_channel] [--json]` | Lists the category and subcategory IDs to pass to `app create`. Needs no sign-in. |
@@ -230,8 +233,6 @@ Theme downloads use a signed HTTPS link that expires after 10 minutes. The CLI d
 
 Edit sections in `src/sections/<name>/` as `body.html`, `style.css` and `schema.json`, with shared styles in `src/_shared.css`, or write `sections/*.vasc` files directly. Keep `src/.generated-sections.json` in version control: it records which section files the build generated, so removing a section's source also removes its compiled file safely, and a compiled file you edited by hand is never deleted.
 
-If you used the `tringify-theme` command from the theme tools, every one of its commands is available as `tringify theme <command>` with the same options, rules and output, and works on the same theme files.
-
 `theme publish` only runs from a clean git work tree. The version's release notes record the commit it was built from, so every published version can be traced to its source. With `--install-store`, the new version is also installed, unpublished, into one of your organization's development stores.
 
 ## Signing in and access
@@ -245,7 +246,7 @@ If you used the `tringify-theme` command from the theme tools, every one of its 
 
 The CLI never receives more access than your own role in that organization or store, and if your role changes, the CLI's access changes with it. Each app action needs the matching permission in your organization: editing needs Edit Apps, releasing needs Release Apps, rotating a secret needs Rotate App Credentials, and `app retire` and `app delete` need Delete Apps. It cannot change your live theme, delete stores, retire or delete apps (you confirm those in the Developer Portal), create paid listings, change pricing, or read an app's existing client secret. If you signed in before app or development store access was added, run `tringify login` again to use `app` or `store` commands; the same applies to `app retire` and `app delete` if you signed in before they were added.
 
-Sign-in uses OAuth with PKCE and a one-time listener on `127.0.0.1`, so your password never passes through the CLI. Access tokens last 15 minutes and are refreshed automatically; refresh tokens rotate on every use. Tokens are kept only in your system keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux (GNOME Keyring, KWallet). Without one, sign-in stops and says so. If the keychain does not answer (for example a locked Secret Service over SSH, where it cannot show its unlock prompt), the CLI says it is waiting and stops after two minutes.
+Sign-in uses OAuth with PKCE and a one-time listener on `127.0.0.1`, so your password never passes through the CLI. Access tokens last 15 minutes and are refreshed automatically; refresh tokens rotate on every use. Tokens are kept only in your system keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux (GNOME Keyring, KWallet). Without one, sign-in stops and says so. Sign-in needs a browser and a keychain, so the CLI is for your own computer; there is no token sign-in for CI. Which store or organization each login belongs to (never the tokens) is kept in `~/.config/tringify` or your system's equivalent; set `TRINGIFY_CONFIG_DIR` to use another directory. If the keychain does not answer (for example a locked Secret Service over SSH, where it cannot show its unlock prompt), the CLI says it is waiting and stops after two minutes.
 
 You can see and disconnect the CLI's access at any time in your Tringify account under **Connected tools**, or run `tringify logout`.
 

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/tringify/cli/internal/pyjson"
+	"github.com/tringify/cli/internal/themejson"
 )
 
 const (
@@ -202,17 +202,17 @@ func Initialize(ctx context.Context, source, destination, name string, tools Too
 	if err != nil {
 		return 0, err
 	}
-	value, err := pyjson.Loads(text)
+	value, err := themejson.Loads(text)
 	if err != nil {
 		return 0, err
 	}
-	manifest, ok := value.(*pyjson.Object)
+	manifest, ok := value.(*themejson.Object)
 	if !ok {
 		return 0, errors.New("theme.json must contain an object")
 	}
-	manifest.Set("name", pyjson.String(name))
-	manifest.Set("status", pyjson.String("draft"))
-	if err := os.WriteFile(manifestPath, []byte(pyjson.Dumps(manifest)+"\n"), 0o644); err != nil {
+	manifest.Set("name", themejson.String(name))
+	manifest.Set("status", themejson.String("draft"))
+	if err := os.WriteFile(manifestPath, []byte(themejson.Dumps(manifest)+"\n"), 0o644); err != nil {
 		return 0, err
 	}
 	if isDir(filepath.Join(staged, "src", "sections")) {
@@ -229,9 +229,9 @@ func Initialize(ctx context.Context, source, destination, name string, tools Too
 	}
 	count := 0
 	if built, err := readJSON(manifestPath, staged); err == nil {
-		if obj, ok := built.(*pyjson.Object); ok {
+		if obj, ok := built.(*themejson.Object); ok {
 			if sections, ok := obj.Get("sections"); ok {
-				if list, ok := sections.([]pyjson.Value); ok {
+				if list, ok := sections.([]themejson.Value); ok {
 					count = len(list)
 				}
 			}

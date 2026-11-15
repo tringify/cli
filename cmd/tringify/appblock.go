@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/tringify/cli/internal/appconfig"
-	"github.com/tringify/cli/internal/pyjson"
 	"github.com/tringify/cli/internal/themebuild"
+	"github.com/tringify/cli/internal/themejson"
 	"github.com/tringify/cli/internal/themeops"
 )
 
@@ -118,7 +118,7 @@ func (a *app) appBlockContext(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("app block context failed: %w", err)
 	}
-	a.println(pyjson.DumpsUnicode(payload))
+	a.println(themejson.DumpsUnicode(payload))
 	return nil
 }
 
