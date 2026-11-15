@@ -13,7 +13,7 @@ import (
 	"github.com/tringify/cli/internal/auth"
 	"github.com/tringify/cli/internal/download"
 	"github.com/tringify/cli/internal/mcp"
-	"github.com/tringify/cli/internal/theme"
+	"github.com/tringify/cli/internal/themeops"
 	"github.com/tringify/cli/internal/upload"
 )
 
@@ -219,7 +219,7 @@ func (a *app) themePull(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	count, err := theme.Unzip(raw, dest)
+	count, err := themeops.Unzip(raw, dest)
 	if err != nil {
 		return err
 	}

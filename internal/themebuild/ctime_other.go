@@ -1,6 +1,6 @@
 //go:build !darwin && !linux
 
-package themekit
+package themebuild
 
 import "io/fs"
 

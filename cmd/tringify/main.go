@@ -14,7 +14,7 @@ import (
 	"syscall"
 
 	"github.com/tringify/cli/internal/mcp"
-	"github.com/tringify/cli/internal/themetools"
+	"github.com/tringify/cli/internal/themebinaries"
 )
 
 // version is set at build time.
@@ -124,7 +124,7 @@ type app struct {
 	apiBase        string
 	devAPIBase     string
 	portalBase     string // the Developer Portal, where dangerous actions are confirmed
-	resolver       *themetools.Resolver
+	resolver       *themebinaries.Resolver
 	uploadHTTP     *http.Client // signed-URL uploads; nil means a 2-minute default
 }
 

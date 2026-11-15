@@ -1,4 +1,4 @@
-package themekit
+package themebuild
 
 import (
 	"context"
