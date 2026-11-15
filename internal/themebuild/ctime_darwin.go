@@ -1,4 +1,4 @@
-package themekit
+package themebuild
 
 import (
 	"io/fs"
@@ -9,7 +9,7 @@ import (
 // notices edits that preserve the modification time.
 func changeTime(info fs.FileInfo) int64 {
 	if st, ok := info.Sys().(*syscall.Stat_t); ok {
-		return st.Ctim.Nano()
+		return st.Ctimespec.Nano()
 	}
 	return 0
 }

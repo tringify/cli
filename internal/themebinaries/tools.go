@@ -1,4 +1,4 @@
-// Package themetools finds the prebuilt theme validator (themecheck) and
+// Package themebinaries finds the prebuilt theme validator (themecheck) and
 // preview renderer (theme-preview-render) published with the Tringify theme
 // tools (https://github.com/tringify/theme-tools).
 //
@@ -10,7 +10,7 @@
 // directory (for example ~/Library/Caches/tringify/theme-tools on macOS or
 // ~/.cache/tringify/theme-tools on Linux). TRINGIFY_THEME_TOOLS_HOME names a
 // directory to use instead, and TRINGIFY_THEME_TOOLS_VERSION pins a release.
-package themetools
+package themebinaries
 
 import (
 	"archive/zip"
@@ -33,7 +33,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tringify/cli/internal/themekit"
+	"github.com/tringify/cli/internal/themebuild"
 )
 
 const repository = "tringify/theme-tools"
@@ -86,8 +86,8 @@ func New(log io.Writer) *Resolver {
 
 // Tools returns the binaries for one command. A non-empty checker or
 // renderer is an explicit path from the command line.
-func (r *Resolver) Tools(checker, renderer string) themekit.Tools {
-	return themekit.Tools{
+func (r *Resolver) Tools(checker, renderer string) themebuild.Tools {
+	return themebuild.Tools{
 		Checker: func(ctx context.Context) (string, error) {
 			return r.binary(ctx, checker, "TRINGIFY_THEME_CHECK", "themecheck")
 		},

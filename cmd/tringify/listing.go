@@ -14,7 +14,7 @@ import (
 
 	"github.com/tringify/cli/internal/devapi"
 	"github.com/tringify/cli/internal/download"
-	"github.com/tringify/cli/internal/theme"
+	"github.com/tringify/cli/internal/themeops"
 )
 
 type listingVersion struct {
@@ -95,7 +95,7 @@ func (a *app) pullListingVersion(ctx context.Context, listing, name string, posi
 	if err != nil {
 		return err
 	}
-	count, err := theme.Unzip(raw, dest)
+	count, err := themeops.Unzip(raw, dest)
 	if err != nil {
 		return err
 	}
@@ -140,7 +140,7 @@ func (a *app) themeDiff(ctx context.Context, args []string) error {
 
 // compareWithVersion packages the theme and compares it with a published
 // version's package.
-func (a *app) compareWithVersion(ctx context.Context, api *devapi.Client, listing string, v listingVersion, root string) ([]theme.Change, error) {
+func (a *app) compareWithVersion(ctx context.Context, api *devapi.Client, listing string, v listingVersion, root string) ([]themeops.Change, error) {
 	published, _, err := downloadVersion(ctx, api, listing, v)
 	if err != nil {
 		return nil, err
@@ -154,18 +154,18 @@ func (a *app) compareWithVersion(ctx context.Context, api *devapi.Client, listin
 	if err != nil {
 		return nil, err
 	}
-	base, err := theme.PackageFiles(published)
+	base, err := themeops.PackageFiles(published)
 	if err != nil {
 		return nil, err
 	}
-	next, err := theme.PackageFiles(local)
+	next, err := themeops.PackageFiles(local)
 	if err != nil {
 		return nil, err
 	}
-	return theme.Diff(base, next), nil
+	return themeops.Diff(base, next), nil
 }
 
-func (a *app) printChanges(changes []theme.Change, version string) {
+func (a *app) printChanges(changes []themeops.Change, version string) {
 	if len(changes) == 0 {
 		a.printf("No differences from version %s.\n", version)
 		return

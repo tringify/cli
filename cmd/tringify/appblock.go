@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/tringify/cli/internal/appconfig"
-	"github.com/tringify/cli/internal/pyjson"
-	"github.com/tringify/cli/internal/theme"
-	"github.com/tringify/cli/internal/themekit"
+	"github.com/tringify/cli/internal/themebuild"
+	"github.com/tringify/cli/internal/themejson"
+	"github.com/tringify/cli/internal/themeops"
 )
 
 func (a *app) appBlock(ctx context.Context, args []string) error {
@@ -39,7 +39,7 @@ func (a *app) checkBlocks(ctx context.Context, file string, config []byte, rende
 	if json.Unmarshal(config, &declared) == nil && len(declared.Blocks) == 0 {
 		return nil
 	}
-	count, problems, err := themekit.CheckAppBlocks(ctx, config, a.tools("", renderer))
+	count, problems, err := themebuild.CheckAppBlocks(ctx, config, a.tools("", renderer))
 	if err != nil {
 		return fmt.Errorf("app block check failed: %w", err)
 	}
@@ -114,11 +114,11 @@ func (a *app) appBlockContext(ctx context.Context, args []string) error {
 			return err
 		}
 	}
-	payload, err := themekit.AppBlockContext(ctx, config, root, *page, *entity, *preset, a.tools(*checker, *renderer))
+	payload, err := themebuild.AppBlockContext(ctx, config, root, *page, *entity, *preset, a.tools(*checker, *renderer))
 	if err != nil {
 		return fmt.Errorf("app block context failed: %w", err)
 	}
-	a.println(pyjson.DumpsUnicode(payload))
+	a.println(themejson.DumpsUnicode(payload))
 	return nil
 }
 
@@ -149,7 +149,7 @@ func (a *app) appBlockPreview(ctx context.Context, args []string) error {
 		}
 	} else {
 		a.println("Downloading the starter theme…")
-		starter, cleanup, err := theme.DownloadStarter(ctx, &http.Client{Timeout: 2 * time.Minute})
+		starter, cleanup, err := themeops.DownloadStarter(ctx, &http.Client{Timeout: 2 * time.Minute})
 		if err != nil {
 			return err
 		}
@@ -157,7 +157,7 @@ func (a *app) appBlockPreview(ctx context.Context, args []string) error {
 		root = starter
 		a.println("Previewing in the starter theme. Pass --theme DIR to use another theme.")
 	}
-	apps := themekit.AppBlocks{
+	apps := themebuild.AppBlocks{
 		Load: func() ([]byte, error) {
 			_, config, _, err := appconfig.Load(*file)
 			return config, err
@@ -165,7 +165,7 @@ func (a *app) appBlockPreview(ctx context.Context, args []string) error {
 		Page:  *page,
 		After: *after,
 	}
-	if err := themekit.ServeAppBlocks(ctx, root, apps, *host, *port, *preset, a.tools(*checker, *renderer), a.stdout); err != nil {
+	if err := themebuild.ServeAppBlocks(ctx, root, apps, *host, *port, *preset, a.tools(*checker, *renderer), a.stdout); err != nil {
 		return fmt.Errorf("app block preview failed: %w", err)
 	}
 	return nil

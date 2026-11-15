@@ -14,7 +14,7 @@ import (
 	"syscall"
 
 	"github.com/tringify/cli/internal/mcp"
-	"github.com/tringify/cli/internal/themetools"
+	"github.com/tringify/cli/internal/themebinaries"
 )
 
 // version is set at build time.
@@ -39,15 +39,18 @@ Themes:
   theme package [DIR]   Write an upload-ready ZIP
   theme context [DIR]   Print the sample data a preview page receives
   theme contract        Print the theme author contract as JSON
+  theme components      Copy the shared storefront components into your section sources
+  theme reference       Write the theme's reference pages (docs/ref-*.md) for theme docs
   theme push            Add the theme to a store as a new, unpublished theme
   theme dev             Sync your edits into an unpublished theme on a store
   theme pull            Download a store theme or a published version into a new directory
   theme diff            Compare the theme with a published version of your listing
   theme listings        List your organization's theme listings
   theme create          Create a free theme listing
-  theme update          Change a listing's text, category, screenshots and style covers
+  theme update          Change a listing's text, category, screenshots, style covers and hero images
   theme categories      List the Theme Store categories
   theme docs            Publish the theme's documentation from markdown files
+  theme docs status     Show the theme documentation's draft, review and published version
   theme submit          Submit a listing for Theme Store review
   theme publish         Publish the theme as a new version of a listing
 
@@ -124,7 +127,7 @@ type app struct {
 	apiBase        string
 	devAPIBase     string
 	portalBase     string // the Developer Portal, where dangerous actions are confirmed
-	resolver       *themetools.Resolver
+	resolver       *themebinaries.Resolver
 	uploadHTTP     *http.Client // signed-URL uploads; nil means a 2-minute default
 }
 
@@ -215,6 +218,10 @@ func (a *app) theme(ctx context.Context, args []string) error {
 		return a.themeCategories(ctx, args[1:])
 	case "docs":
 		return a.themeDocs(ctx, args[1:])
+	case "components":
+		return a.themeComponents(ctx, args[1:])
+	case "reference":
+		return a.themeReference(ctx, args[1:])
 	}
 	return fmt.Errorf("unknown theme command %q", args[0])
 }

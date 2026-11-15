@@ -1,9 +1,9 @@
-// Package themekit builds, validates, packages and previews Tringify themes.
+// Package themebuild builds, validates, packages and previews Tringify themes.
 //
 // It is a Go port of the Python theme tools (github.com/tringify/theme-tools)
 // and keeps their file layout, rules and messages. Validation and preview
 // rendering run the prebuilt themecheck and theme-preview-render binaries.
-package themekit
+package themebuild
 
 import (
 	"archive/zip"

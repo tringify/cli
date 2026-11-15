@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/tringify/cli/internal/appconfig"
-	"github.com/tringify/cli/internal/theme"
+	"github.com/tringify/cli/internal/themeops"
 )
 
 // appStarterArchive is the app starter source.
@@ -72,7 +72,7 @@ func (a *app) appInit(ctx context.Context, args []string) error {
 	}
 
 	a.println("Downloading the app starter…")
-	source, cleanup, err := theme.DownloadArchive(ctx, &http.Client{Timeout: 2 * time.Minute}, appStarterArchive, "the app starter")
+	source, cleanup, err := themeops.DownloadArchive(ctx, &http.Client{Timeout: 2 * time.Minute}, appStarterArchive, "the app starter")
 	if err != nil {
 		return err
 	}

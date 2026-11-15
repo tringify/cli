@@ -1,4 +1,4 @@
-package themekit
+package themebuild
 
 import (
 	"context"
@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tringify/cli/internal/pyjson"
+	"github.com/tringify/cli/internal/themejson"
 )
 
 const (
@@ -117,8 +117,8 @@ type Preview struct {
 
 	mu        sync.Mutex
 	snapshot  map[string]asset
-	name      pyjson.Value
-	pages     pyjson.Value
+	name      themejson.Value
+	pages     themejson.Value
 	revision  int
 	errText   string
 	signature string
@@ -149,7 +149,7 @@ func NewPreview(root, temp, base, renderer, preset string, tools Tools, out io.W
 	}
 	return &Preview{
 		Root: resolved, Temp: temp, Base: base, Renderer: renderer, Preset: preset, Tools: tools, Out: out,
-		snapshot: map[string]asset{}, name: pyjson.String(filepath.Base(resolved)), pages: []pyjson.Value{},
+		snapshot: map[string]asset{}, name: themejson.String(filepath.Base(resolved)), pages: []themejson.Value{},
 	}, nil
 }
 
@@ -227,16 +227,16 @@ func (p *Preview) rebuild(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	value, err := pyjson.Loads(text)
+	value, err := themejson.Loads(text)
 	if err != nil {
 		return false, err
 	}
-	manifest, ok := value.(*pyjson.Object)
+	manifest, ok := value.(*themejson.Object)
 	if !ok {
 		return false, errors.New("renderer returned an invalid manifest")
 	}
 	pagesValue, _ := manifest.Get("pages")
-	pages, ok := pagesValue.([]pyjson.Value)
+	pages, ok := pagesValue.([]themejson.Value)
 	if !ok || len(pages) == 0 {
 		return false, errors.New("renderer returned no preview pages")
 	}
@@ -247,7 +247,7 @@ func (p *Preview) rebuild(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	for _, pageValue := range pages {
-		page, ok := pageValue.(*pyjson.Object)
+		page, ok := pageValue.(*themejson.Object)
 		if !ok {
 			return false, errors.New("renderer returned an invalid preview page")
 		}
@@ -259,11 +259,11 @@ func (p *Preview) rebuild(ctx context.Context) (bool, error) {
 		if !hasFile {
 			return false, errors.New("'file'")
 		}
-		route, ok := routeValue.(pyjson.String)
+		route, ok := routeValue.(themejson.String)
 		if !ok || !strings.HasPrefix(string(route), p.Base+"/") || strings.ContainsAny(string(route), "?#") {
 			return false, errors.New("renderer returned an invalid preview route")
 		}
-		filename, ok := fileValue.(pyjson.String)
+		filename, ok := fileValue.(themejson.String)
 		if !ok {
 			return false, errors.New("renderer returned an invalid page file")
 		}
@@ -316,9 +316,9 @@ func (p *Preview) rebuild(ctx context.Context) (bool, error) {
 	name, hasName := manifest.Get("name")
 	var notes []string
 	notesValue, _ := manifest.Get("notes")
-	if list, ok := notesValue.([]pyjson.Value); ok {
+	if list, ok := notesValue.([]themejson.Value); ok {
 		for _, note := range list {
-			notes = append(notes, pyjson.Str(note))
+			notes = append(notes, themejson.Str(note))
 		}
 	}
 	if joined := strings.Join(notes, "\n"); joined != p.notes {
@@ -335,7 +335,7 @@ func (p *Preview) rebuild(ctx context.Context) (bool, error) {
 	if !hasName {
 		return true, errors.New("'name'")
 	}
-	fmt.Fprintf(p.Out, "Preview updated: %s · %d pages\n", pyjson.Str(name), len(pages))
+	fmt.Fprintf(p.Out, "Preview updated: %s · %d pages\n", themejson.Str(name), len(pages))
 	return true, nil
 }
 
@@ -344,12 +344,12 @@ func (p *Preview) rebuild(ctx context.Context) (bool, error) {
 func (p *Preview) State() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	state := pyjson.NewObject()
-	state.Set("revision", pyjson.Int(strconv.Itoa(p.revision)))
-	state.Set("error", pyjson.String(p.errText))
+	state := themejson.NewObject()
+	state.Set("revision", themejson.Int(strconv.Itoa(p.revision)))
+	state.Set("error", themejson.String(p.errText))
 	state.Set("name", p.name)
 	state.Set("pages", p.pages)
-	return pyjson.Compact(state)
+	return themejson.Compact(state)
 }
 
 // Snapshot returns the current snapshot for tests.

@@ -1,0 +1,231 @@
+<script>
+/* tf-datepicker: shared date and date-time picker for Tringify themes (source: the Tringify CLI,
+   internal/themebuild/components/datepicker.html, copied into themes by `tringify theme components`; edit it there, never in a theme). It enhances every input[type=date] and
+   input[type=datetime-local] on the page: the input stays in the form (value, events and validation unchanged) but is
+   hidden, and a button in the input's own classes opens a calendar. Month and year menus make a birthday quick to
+   reach; date-time fields add a time list. Days outside min/max are disabled. Labels come from the page language;
+   dates are shown with Intl in the shopper's locale. On phones it opens as a bottom sheet. Without JS the native
+   input is used. */
+(function () {
+  if (window.__tfdp) return; window.__tfdp = true;
+  var D = document, H = D.documentElement;
+  var lang = (H.getAttribute("lang") || navigator.language || "en").toLowerCase();
+  var T = {
+    en: { choose: "Choose a date", chooset: "Choose a date and time", clear: "Clear", done: "Done", prev: "Previous month", next: "Next month", month: "Month", year: "Year", time: "Time", today: "Today" },
+    de: { choose: "Datum wählen", chooset: "Datum und Uhrzeit wählen", clear: "Löschen", done: "Fertig", prev: "Vorheriger Monat", next: "Nächster Monat", month: "Monat", year: "Jahr", time: "Uhrzeit", today: "Heute" },
+    es: { choose: "Elige una fecha", chooset: "Elige fecha y hora", clear: "Borrar", done: "Listo", prev: "Mes anterior", next: "Mes siguiente", month: "Mes", year: "Año", time: "Hora", today: "Hoy" },
+    fr: { choose: "Choisir une date", chooset: "Choisir la date et l’heure", clear: "Effacer", done: "Valider", prev: "Mois précédent", next: "Mois suivant", month: "Mois", year: "Année", time: "Heure", today: "Aujourd’hui" },
+    it: { choose: "Scegli una data", chooset: "Scegli data e ora", clear: "Cancella", done: "Fatto", prev: "Mese precedente", next: "Mese successivo", month: "Mese", year: "Anno", time: "Ora", today: "Oggi" },
+    ar: { choose: "اختر تاريخًا", chooset: "اختر التاريخ والوقت", clear: "مسح", done: "تم", prev: "الشهر السابق", next: "الشهر التالي", month: "الشهر", year: "السنة", time: "الوقت", today: "اليوم" },
+    he: { choose: "בחירת תאריך", chooset: "בחירת תאריך ושעה", clear: "ניקוי", done: "סיום", prev: "החודש הקודם", next: "החודש הבא", month: "חודש", year: "שנה", time: "שעה", today: "היום" }
+  };
+  var L = T[lang.split("-")[0]] || T.en;
+  function first() { try { var w = new Intl.Locale(lang).weekInfo || new Intl.Locale(lang).getWeekInfo(); if (w && w.firstDay) return w.firstDay % 7; } catch (e) {} return /^en-(us|ca)|^he|^ar|^ja|^ko|^pt-br|^es-mx/.test(lang) ? 0 : 1; }
+  var FD = first();
+  var fmtD = new Intl.DateTimeFormat(lang, { day: "numeric", month: "long", year: "numeric" });
+  var fmtDT = new Intl.DateTimeFormat(lang, { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+  var fmtT = new Intl.DateTimeFormat(lang, { hour: "numeric", minute: "2-digit" });
+  var fmtM = new Intl.DateTimeFormat(lang, { month: "long" });
+  var fmtW = new Intl.DateTimeFormat(lang, { weekday: "short" });
+  var fmtWL = new Intl.DateTimeFormat(lang, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function iso(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  function parse(v) { var m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/.exec(v || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)) : null; }
+  function day(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+
+  var css = ".tf-dp-native{position:absolute!important;width:1px!important;height:1px!important;margin:-1px!important;padding:0!important;overflow:hidden!important;clip:rect(0 0 0 0)!important;border:0!important;opacity:0!important}" +
+    ".tf-dp-trigger{display:flex!important;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:start;cursor:pointer;font:inherit}" +
+    ".tf-dp-trigger .tf-dp-v{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tf-dp-trigger .tf-dp-v.is-empty{opacity:.55}" +
+    ".tf-dp-trigger svg{flex:none;width:18px;height:18px;opacity:.7}" +
+    ".tf-dp-scrim{position:fixed;inset:0;z-index:2147482990;background:rgba(0,0,0,.32)}" +
+    ".tf-dp{position:fixed;z-index:2147483000;width:340px;max-width:calc(100vw - 16px);padding:14px;box-sizing:border-box;border:1px solid var(--dp-line);border-radius:min(var(--dp-r),18px);background:var(--dp-bg);color:var(--dp-fg);font-family:var(--dp-font);font-size:14px;line-height:1.3;box-shadow:0 18px 50px -18px rgba(0,0,0,.35);-webkit-font-smoothing:antialiased}" +
+    ".tf-dp *{box-sizing:border-box;font:inherit;color:inherit}" +
+    ".tf-dp__head{display:flex;align-items:center;gap:6px;margin-bottom:10px}" +
+    ".tf-dp__sel{flex:1;display:flex;gap:6px;min-width:0}.tf-dp__sel select[data-dp=m]{flex:1 1 auto}.tf-dp__sel select[data-dp=y]{flex:0 0 88px}" +
+    ".tf-dp select{flex:1;min-width:0;height:36px;padding:0 26px 0 10px;border:1px solid var(--dp-line);border-radius:min(var(--dp-r),10px);background:var(--dp-bg) url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\") no-repeat right 8px center/14px;-webkit-appearance:none;appearance:none;cursor:pointer}" +
+    "[dir=rtl] .tf-dp select{padding:0 10px 0 26px;background-position:left 8px center}" +
+    ".tf-dp__nav{flex:none;display:grid;place-items:center;width:36px;height:36px;padding:0;border:0;border-radius:999px;background:transparent;cursor:pointer}" +
+    ".tf-dp__nav:hover:not(:disabled){background:var(--dp-soft)}.tf-dp__nav:disabled{opacity:.3;cursor:default}.tf-dp__nav svg{width:18px;height:18px}" +
+    "[dir=rtl] .tf-dp__nav svg{transform:scaleX(-1)}" +
+    ".tf-dp__grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}" +
+    ".tf-dp__wd{padding:4px 0 6px;text-align:center;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.55}" +
+    ".tf-dp__d{height:38px;padding:0;border:0;border-radius:999px;background:transparent;cursor:pointer;font-variant-numeric:tabular-nums}" +
+    ".tf-dp__d:hover:not(:disabled){background:var(--dp-soft)}.tf-dp__d.is-out{opacity:.35}.tf-dp__d:disabled{opacity:.22;cursor:default;text-decoration:line-through}" +
+    ".tf-dp__d.is-today{box-shadow:inset 0 0 0 1px var(--dp-line)}" +
+    ".tf-dp__d[aria-selected=true]{background:var(--dp-acc)!important;color:var(--dp-acc-fg);opacity:1}" +
+    ".tf-dp__d:focus-visible,.tf-dp__nav:focus-visible,.tf-dp__btn:focus-visible,.tf-dp select:focus-visible{outline:2px solid var(--dp-acc);outline-offset:1px}" +
+    ".tf-dp__time{display:flex;align-items:center;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--dp-line)}.tf-dp__time label{flex:none;font-weight:600}" +
+    ".tf-dp__foot{display:flex;justify-content:space-between;gap:8px;margin-top:12px}" +
+    ".tf-dp__btn{min-height:36px;padding:0 14px;border:1px solid var(--dp-line);border-radius:min(var(--dp-r),999px);background:transparent;cursor:pointer;font-weight:600}" +
+    ".tf-dp__btn--main{border-color:var(--dp-acc);background:var(--dp-acc);color:var(--dp-acc-fg)}" +
+    "@media (max-width:599px){.tf-dp{left:0!important;right:0!important;top:auto!important;bottom:0!important;width:100%;max-width:none;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));border-radius:min(var(--dp-r),18px) min(var(--dp-r),18px) 0 0;border-width:1px 0 0}.tf-dp__d{height:44px}}";
+  var st = D.createElement("style"); st.textContent = css; (D.head || H).appendChild(st);
+
+  var ICAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>';
+  var ICHEV = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>';
+  var ICHEVR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+
+  function label(inp, dt) { var v = parse(inp.value); return v ? (dt ? fmtDT : fmtD).format(v) : (inp.getAttribute("placeholder") || (dt ? L.chooset : L.choose)); }
+  function enhance(inp) {
+    if (inp.__tfdp || inp.closest("[data-tf-dp-native]")) return; inp.__tfdp = true;
+    var dt = inp.type === "datetime-local";
+    var b = D.createElement("button"); b.type = "button";
+    b.className = (inp.className ? inp.className + " " : "") + "tf-dp-trigger";
+    b.setAttribute("aria-haspopup", "dialog");
+    if (inp.id) { var lb = D.querySelector('label[for="' + CSS.escape(inp.id) + '"]'); if (lb) { if (!lb.id) lb.id = inp.id + "-lbl"; b.setAttribute("aria-labelledby", lb.id + " " + (inp.id + "-dpv")); } }
+    else { var wl = inp.closest("label"); if (wl) b.setAttribute("aria-label", (wl.textContent || "").trim()); }
+    if (inp.getAttribute("aria-describedby")) b.setAttribute("aria-describedby", inp.getAttribute("aria-describedby"));
+    b.innerHTML = '<span class="tf-dp-v"></span>' + ICAL;
+    var v = b.firstChild; if (inp.id) v.id = inp.id + "-dpv";
+    function sync() { var has = !!parse(inp.value); v.textContent = label(inp, dt); v.classList.toggle("is-empty", !has); b.disabled = inp.disabled; }
+    sync();
+    inp.classList.add("tf-dp-native"); inp.setAttribute("tabindex", "-1"); inp.setAttribute("aria-hidden", "true");
+    inp.parentNode.insertBefore(b, inp.nextSibling);
+    inp.addEventListener("input", sync); inp.addEventListener("change", sync);
+    inp.__tfdpSync = sync;
+    /* a theme that sets the value from code (reset, restore) calls nothing: watch the property. */
+    var desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+    try { Object.defineProperty(inp, "value", { configurable: true, get: function () { return desc.get.call(this); }, set: function (x) { desc.set.call(this, x); sync(); } }); } catch (e) {}
+    new MutationObserver(sync).observe(inp, { attributes: true, attributeFilter: ["disabled", "min", "max"] });
+    b.addEventListener("click", function () { open(inp, b, dt); });
+    inp.addEventListener("invalid", function () { b.setAttribute("aria-invalid", "true"); setTimeout(function () { b.focus(); }, 0); });
+  }
+
+  var cur = null;
+  function close(ret) {
+    if (!cur) return; var c = cur; cur = null;
+    c.el.remove(); if (c.scrim) c.scrim.remove();
+    D.removeEventListener("mousedown", c.out, true); D.removeEventListener("keydown", c.key, true); removeEventListener("resize", c.pos); removeEventListener("scroll", c.pos, true);
+    if (ret !== false) c.btn.focus();
+  }
+  function colors(btn) {
+    var cs = getComputedStyle(btn), form = btn.closest("form"), sub = form && form.querySelector('button[type=submit],[type=submit]');
+    var fg = cs.color, bg = null, n = btn.parentElement;
+    /* the panel takes the page's background (not the field's tint), from the nearest painted ancestor */
+    while (n && n !== D.documentElement) { var b2 = getComputedStyle(n).backgroundColor; if (b2 && b2 !== "transparent" && !/rgba\(.*,\s*0\)$/.test(b2)) { bg = b2; break; } n = n.parentElement; }
+    if (!bg) bg = getComputedStyle(D.body).backgroundColor || "#fff";
+    var acc = fg, accf = bg;
+    if (sub) { var ss = getComputedStyle(sub); if (ss.backgroundColor && !/rgba\(.*,\s*0\)$/.test(ss.backgroundColor) && ss.backgroundColor !== "transparent") { acc = ss.backgroundColor; accf = ss.color; } }
+    var line = cs.borderTopColor && cs.borderTopWidth !== "0px" ? cs.borderTopColor : "color-mix(in srgb," + fg + " 18%,transparent)";
+    var r = parseFloat(cs.borderTopLeftRadius) || 0;
+    return { "--dp-bg": bg, "--dp-fg": fg, "--dp-acc": acc, "--dp-acc-fg": accf, "--dp-line": line, "--dp-soft": "color-mix(in srgb," + fg + " 8%,transparent)", "--dp-r": Math.max(r, 4) + "px", "--dp-font": cs.fontFamily };
+  }
+  function open(inp, btn, dt) {
+    if (cur && cur.inp === inp) { close(); return; } close(false);
+    var min = parse(inp.min), max = parse(inp.max), val = parse(inp.value);
+    var minD = min && day(min), maxD = max && day(max);
+    var today = day(new Date());
+    var sel = val ? day(val) : null;
+    var view = sel ? new Date(sel) : (inp.name === "date_of_birth" || inp.autocomplete === "bday") && !val ? new Date(today.getFullYear() - 25, today.getMonth(), 1) : new Date(today);
+    if (minD && view < minD) view = new Date(minD); if (maxD && view > maxD) view = new Date(maxD);
+    view.setDate(1);
+    var time = val ? val.getHours() * 60 + val.getMinutes() : null;
+    var step = Math.max(5, Math.round((+inp.step || 900) / 60)); if (step > 60) step = 60;
+    var focusDay = sel || (minD && today < minD ? minD : today);
+
+    var el = D.createElement("div"); el.className = "tf-dp"; el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true");
+    el.setAttribute("aria-label", dt ? L.chooset : L.choose);
+    el.setAttribute("dir", getComputedStyle(btn).direction);
+    var c = colors(btn); for (var k in c) el.style.setProperty(k, c[k]);
+    var phone = matchMedia("(max-width:599px)").matches, scrim = null;
+    if (phone) { scrim = D.createElement("div"); scrim.className = "tf-dp-scrim"; D.body.appendChild(scrim); }
+    D.body.appendChild(el);
+
+    var yMin = (minD || new Date(today.getFullYear() - 110, 0, 1)).getFullYear(), yMax = (maxD || new Date(today.getFullYear() + 5, 11, 31)).getFullYear();
+    function render() {
+      var y = view.getFullYear(), m = view.getMonth();
+      var prevOk = !minD || new Date(y, m, 0) >= minD, nextOk = !maxD || new Date(y, m + 1, 1) <= maxD;
+      var h = '<div class="tf-dp__head"><button type="button" class="tf-dp__nav" data-dp="prev" aria-label="' + L.prev + '"' + (prevOk ? "" : " disabled") + ">" + ICHEV + "</button>";
+      h += '<div class="tf-dp__sel"><select data-dp="m" aria-label="' + L.month + '">';
+      for (var i = 0; i < 12; i++) { var dis = (minD && y === minD.getFullYear() && i < minD.getMonth()) || (maxD && y === maxD.getFullYear() && i > maxD.getMonth()); h += '<option value="' + i + '"' + (i === m ? " selected" : "") + (dis ? " disabled" : "") + ">" + fmtM.format(new Date(2000, i, 1)) + "</option>"; }
+      h += '</select><select data-dp="y" aria-label="' + L.year + '">';
+      for (var yy = yMax; yy >= yMin; yy--) h += '<option value="' + yy + '"' + (yy === y ? " selected" : "") + ">" + yy + "</option>";
+      h += '</select></div><button type="button" class="tf-dp__nav" data-dp="next" aria-label="' + L.next + '"' + (nextOk ? "" : " disabled") + ">" + ICHEVR + "</button></div>";
+      h += '<div class="tf-dp__grid" role="grid">';
+      for (var w = 0; w < 7; w++) { var wd = new Date(2024, 0, 7 + ((FD + w) % 7)); h += '<span class="tf-dp__wd" aria-hidden="true">' + fmtW.format(wd) + "</span>"; }
+      var start = new Date(y, m, 1); start.setDate(1 - ((start.getDay() - FD + 7) % 7));
+      for (var j = 0; j < 42; j++) {
+        var d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + j);
+        if (j >= 35 && d.getMonth() !== m) break;
+        var off = (minD && d < minD) || (maxD && d > maxD), out = d.getMonth() !== m, is = sel && +d === +sel, foc = +d === +focusDay;
+        h += '<button type="button" class="tf-dp__d' + (out ? " is-out" : "") + (+d === +today ? " is-today" : "") + '" data-d="' + iso(d) + '" aria-label="' + fmtWL.format(d) + '" aria-selected="' + (is ? "true" : "false") + '" tabindex="' + (foc ? "0" : "-1") + '"' + (off ? " disabled" : "") + ">" + d.getDate() + "</button>";
+      }
+      h += "</div>";
+      if (dt) {
+        h += '<div class="tf-dp__time"><label for="tf-dp-time">' + L.time + '</label><select id="tf-dp-time" data-dp="t">';
+        var onMin = sel && minD && +sel === +minD, minM = onMin ? min.getHours() * 60 + min.getMinutes() : -1;
+        var onMax = sel && maxD && +sel === +maxD, maxM = onMax ? max.getHours() * 60 + max.getMinutes() : 1e9;
+        var t0 = time == null ? (onMin ? Math.ceil(minM / step) * step : 9 * 60) : time;
+        for (var t = 0; t < 1440; t += step) { var ok = t >= minM && t <= maxM; h += '<option value="' + t + '"' + (t === t0 ? " selected" : "") + (ok ? "" : " disabled") + ">" + fmtT.format(new Date(2000, 0, 1, Math.floor(t / 60), t % 60)) + "</option>"; }
+        h += "</select></div>";
+      }
+      h += '<div class="tf-dp__foot">' + (inp.required ? "<span></span>" : '<button type="button" class="tf-dp__btn" data-dp="clear">' + L.clear + "</button>") +
+        (dt ? '<button type="button" class="tf-dp__btn tf-dp__btn--main" data-dp="done"' + (sel ? "" : " disabled") + ">" + L.done + "</button>" : "<span></span>") + "</div>";
+      el.innerHTML = h;
+    }
+    function commit(final) {
+      var x = "";
+      if (sel) { x = iso(sel); if (dt) { var ts = el.querySelector("[data-dp=t]"), tm = ts ? +ts.value : (time || 0); time = tm; x += "T" + pad(Math.floor(tm / 60)) + ":" + pad(tm % 60); } }
+      if (inp.value !== x) { inp.value = x; inp.dispatchEvent(new Event("input", { bubbles: true })); inp.dispatchEvent(new Event("change", { bubbles: true })); }
+      btn.removeAttribute("aria-invalid");
+      if (final) close();
+    }
+    function focusGrid() { var f = el.querySelector('.tf-dp__d[tabindex="0"]') || el.querySelector(".tf-dp__d:not(:disabled)"); if (f) f.focus(); }
+    function move(nd) {
+      if (minD && nd < minD) nd = new Date(minD); if (maxD && nd > maxD) nd = new Date(maxD);
+      focusDay = nd; if (nd.getMonth() !== view.getMonth() || nd.getFullYear() !== view.getFullYear()) { view = new Date(nd.getFullYear(), nd.getMonth(), 1); render(); }
+      else el.querySelectorAll(".tf-dp__d").forEach(function (x) { x.tabIndex = x.getAttribute("data-d") === iso(nd) ? 0 : -1; });
+      focusGrid();
+    }
+    el.addEventListener("click", function (e) {
+      var t = e.target.closest("button"); if (!t || t.disabled) return;
+      var a = t.getAttribute("data-dp");
+      if (a === "prev") { view.setMonth(view.getMonth() - 1); render(); }
+      else if (a === "next") { view.setMonth(view.getMonth() + 1); render(); }
+      else if (a === "clear") { sel = null; commit(true); }
+      else if (a === "done") commit(true);
+      else if (t.hasAttribute("data-d")) { sel = parse(t.getAttribute("data-d")); focusDay = sel; if (dt) { render(); commit(false); focusGrid(); } else commit(true); }
+    });
+    el.addEventListener("change", function (e) {
+      var a = e.target.getAttribute("data-dp");
+      if (a === "m") { view.setMonth(+e.target.value); render(); el.querySelector("[data-dp=m]").focus(); }
+      else if (a === "y") { var nv = new Date(+e.target.value, view.getMonth(), 1); if (minD && nv < new Date(minD.getFullYear(), minD.getMonth(), 1)) nv = new Date(minD.getFullYear(), minD.getMonth(), 1); if (maxD && nv > maxD) nv = new Date(maxD.getFullYear(), maxD.getMonth(), 1); view = nv; render(); el.querySelector("[data-dp=y]").focus(); }
+      else if (a === "t") { time = +e.target.value; if (sel) commit(false); }
+    });
+    el.addEventListener("keydown", function (e) {
+      var t = e.target; if (!t.classList || !t.classList.contains("tf-dp__d")) return;
+      var d = parse(t.getAttribute("data-d")), n = null;
+      switch (e.key) {
+        case "ArrowLeft": n = new Date(d.getFullYear(), d.getMonth(), d.getDate() + (el.dir === "rtl" ? 1 : -1)); break;
+        case "ArrowRight": n = new Date(d.getFullYear(), d.getMonth(), d.getDate() + (el.dir === "rtl" ? -1 : 1)); break;
+        case "ArrowUp": n = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 7); break;
+        case "ArrowDown": n = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7); break;
+        case "PageUp": n = new Date(d.getFullYear(), d.getMonth() - 1, d.getDate()); break;
+        case "PageDown": n = new Date(d.getFullYear(), d.getMonth() + 1, d.getDate()); break;
+        case "Home": n = new Date(d.getFullYear(), d.getMonth(), 1); break;
+        case "End": n = new Date(d.getFullYear(), d.getMonth() + 1, 0); break;
+      }
+      if (n) { e.preventDefault(); move(n); }
+    });
+    function pos() {
+      if (matchMedia("(max-width:599px)").matches) return;
+      var r = btn.getBoundingClientRect(), w = el.offsetWidth, hh = el.offsetHeight;
+      var left = Math.min(Math.max(8, el.dir === "rtl" ? r.right - w : r.left), innerWidth - w - 8);
+      var top = r.bottom + 6; if (top + hh > innerHeight - 8 && r.top - hh - 6 > 8) top = r.top - hh - 6;
+      el.style.left = left + "px"; el.style.top = Math.max(8, top) + "px";
+    }
+    function out(e) { if (!el.contains(e.target) && !btn.contains(e.target)) close(false); }
+    function key(e) {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); return; }
+      if (e.key === "Tab") { var f = el.querySelectorAll("button:not(:disabled):not([tabindex='-1']),select"); if (!f.length) return; var a = f[0], z = f[f.length - 1]; if (e.shiftKey && D.activeElement === a) { e.preventDefault(); z.focus(); } else if (!e.shiftKey && D.activeElement === z) { e.preventDefault(); a.focus(); } }
+    }
+    render(); pos(); focusGrid();
+    cur = { inp: inp, btn: btn, el: el, scrim: scrim, out: out, key: key, pos: pos };
+    D.addEventListener("mousedown", out, true); D.addEventListener("keydown", key, true); addEventListener("resize", pos); addEventListener("scroll", pos, true);
+  }
+
+  function scan(root) { (root.querySelectorAll ? root : D).querySelectorAll('input[type="date"],input[type="datetime-local"]').forEach(enhance); }
+  function boot() { scan(D); new MutationObserver(function (ms) { for (var i = 0; i < ms.length; i++) for (var j = 0; j < ms[i].addedNodes.length; j++) { var n = ms[i].addedNodes[j]; if (n.nodeType === 1) { if (n.matches && n.matches('input[type="date"],input[type="datetime-local"]')) enhance(n); else scan(n); } } }).observe(D.body, { childList: true, subtree: true }); }
+  if (D.readyState === "loading") D.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+</script>

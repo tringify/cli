@@ -11,7 +11,7 @@ import (
 
 	"github.com/tringify/cli/internal/auth"
 	"github.com/tringify/cli/internal/mcp"
-	"github.com/tringify/cli/internal/themekit"
+	"github.com/tringify/cli/internal/themebuild"
 )
 
 // devState remembers, per store, the unpublished theme `theme dev` syncs into.
@@ -102,7 +102,7 @@ func (a *app) themeDev(ctx context.Context, args []string) error {
 	}
 
 	var name string
-	signature, _ := themekit.SourceSignature(root)
+	signature, _ := themebuild.SourceSignature(root)
 	if themeID == "" {
 		if themeID, name, err = a.importTheme(ctx, target, root); err != nil {
 			return err
@@ -135,7 +135,7 @@ func (a *app) themeDev(ctx context.Context, args []string) error {
 			return nil
 		case <-time.After(*interval):
 		}
-		next, err := themekit.SourceSignature(root)
+		next, err := themebuild.SourceSignature(root)
 		if err != nil || next == signature {
 			continue
 		}
@@ -146,7 +146,7 @@ func (a *app) themeDev(ctx context.Context, args []string) error {
 				return nil
 			case <-time.After(400 * time.Millisecond):
 			}
-			again, err := themekit.SourceSignature(root)
+			again, err := themebuild.SourceSignature(root)
 			if err != nil || again == next {
 				break
 			}

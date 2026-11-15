@@ -1,4 +1,4 @@
-package themekit
+package themebuild
 
 // studioHTML is the preview studio page. __BASE__ is replaced with the
 // session's secret base path.

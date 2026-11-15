@@ -1,4 +1,4 @@
-package themekit
+package themebuild
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tringify/cli/internal/pyjson"
+	"github.com/tringify/cli/internal/themejson"
 )
 
 // renderTimeout bounds one run of the preview renderer.
@@ -26,7 +26,7 @@ func renderFailure(out output, fallback string) error {
 
 // InspectContext packages the theme and returns the exact sample CTX the
 // preview renderer gives one page.
-func InspectContext(ctx context.Context, root, page, entity, preset string, tools Tools) (pyjson.Value, error) {
+func InspectContext(ctx context.Context, root, page, entity, preset string, tools Tools) (themejson.Value, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
@@ -70,11 +70,11 @@ func InspectContext(ctx context.Context, root, page, entity, preset string, tool
 	if out.exitCode != 0 {
 		return nil, renderFailure(out, "theme context inspection failed")
 	}
-	value, err := pyjson.Loads(out.stdout)
+	value, err := themejson.Loads(out.stdout)
 	if err != nil {
 		return nil, errors.New("theme preview renderer returned invalid context JSON")
 	}
-	payload, ok := value.(*pyjson.Object)
+	payload, ok := value.(*themejson.Object)
 	invalid := errors.New("theme preview renderer returned an invalid context result")
 	if !ok {
 		return nil, invalid
@@ -82,7 +82,7 @@ func InspectContext(ctx context.Context, root, page, entity, preset string, tool
 	version, _ := payload.Get("schema_version")
 	gotPage, _ := payload.Get("page")
 	ctxValue, _ := payload.Get("context")
-	if _, isObj := ctxValue.(*pyjson.Object); !pyjson.IsInt(version, 1) || gotPage != pyjson.String(page) || !isObj {
+	if _, isObj := ctxValue.(*themejson.Object); !themejson.IsInt(version, 1) || gotPage != themejson.String(page) || !isObj {
 		return nil, invalid
 	}
 	return payload, nil

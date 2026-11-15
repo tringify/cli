@@ -1,4 +1,4 @@
-package themekit
+package themebuild
 
 import (
 	"bytes"
@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/tringify/cli/internal/pyjson"
+	"github.com/tringify/cli/internal/themejson"
 )
 
 // Modes accepted by themecheck.
@@ -30,8 +30,8 @@ func run(ctx context.Context, program string, args ...string) (output, error) {
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
 	out := output{
-		stdout: pyjson.NormalizeNewlines(stdout.String()),
-		stderr: pyjson.NormalizeNewlines(stderr.String()),
+		stdout: themejson.NormalizeNewlines(stdout.String()),
+		stderr: themejson.NormalizeNewlines(stderr.String()),
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && ctx.Err() == nil {
@@ -86,28 +86,28 @@ func capitalize(s string) string {
 // CheckerFailure turns themecheck's JSON result into a readable message
 // that names the file and the reason.
 func CheckerFailure(stdout, stderr string) string {
-	payload, err := pyjson.Loads(stdout)
+	payload, err := themejson.Loads(stdout)
 	if err != nil {
 		return orFailed(stdout + stderr)
 	}
-	obj, ok := payload.(*pyjson.Object)
+	obj, ok := payload.(*themejson.Object)
 	if !ok {
 		return orFailed(stdout + stderr)
 	}
 	errValue, _ := obj.Get("error")
-	message, ok := errValue.(pyjson.String)
+	message, ok := errValue.(themejson.String)
 	if !ok {
 		return orFailed(stdout + stderr)
 	}
 	text := string(message)
-	if code, _ := obj.Get("code"); pyjson.Truthy(code) {
-		text += " (" + pyjson.Str(code) + ")"
+	if code, _ := obj.Get("code"); themejson.Truthy(code) {
+		text += " (" + themejson.Str(code) + ")"
 	}
 	details, _ := obj.Get("details")
-	if d, ok := details.(*pyjson.Object); ok {
+	if d, ok := details.(*themejson.Object); ok {
 		for _, key := range d.Keys() {
 			value, _ := d.Get(key)
-			if value == nil || value == pyjson.String("") {
+			if value == nil || value == themejson.String("") {
 				continue
 			}
 			label := capitalize(strings.ReplaceAll(key, "_", " "))
@@ -120,15 +120,15 @@ func CheckerFailure(stdout, stderr string) string {
 			}
 			var shown string
 			switch value.(type) {
-			case *pyjson.Object, []pyjson.Value:
-				shown = pyjson.DumpsUnicode(value)
+			case *themejson.Object, []themejson.Value:
+				shown = themejson.DumpsUnicode(value)
 			default:
-				shown = pyjson.Str(value)
+				shown = themejson.Str(value)
 			}
 			text += "\n  " + label + ": " + shown
 		}
-	} else if pyjson.Truthy(details) {
-		text += "\n  " + pyjson.Str(details)
+	} else if themejson.Truthy(details) {
+		text += "\n  " + themejson.Str(details)
 	}
 	return text
 }
@@ -165,11 +165,11 @@ func Validate(ctx context.Context, root, mode string, tools Tools) ([]string, []
 
 // Warnings returns the warnings in a passing themecheck result, one line each.
 func Warnings(stdout string) []string {
-	payload, err := pyjson.Loads(stdout)
+	payload, err := themejson.Loads(stdout)
 	if err != nil {
 		return nil
 	}
-	obj, ok := payload.(*pyjson.Object)
+	obj, ok := payload.(*themejson.Object)
 	if !ok {
 		return nil
 	}
@@ -179,14 +179,14 @@ func Warnings(stdout string) []string {
 
 // diagnosticLines renders a themecheck diagnostic list as
 // "file:line:column: message; fix" lines, or nil when value is not one.
-func diagnosticLines(value pyjson.Value) []string {
-	list, ok := value.([]pyjson.Value)
+func diagnosticLines(value themejson.Value) []string {
+	list, ok := value.([]themejson.Value)
 	if !ok || len(list) == 0 {
 		return nil
 	}
 	lines := make([]string, 0, len(list))
 	for _, item := range list {
-		d, ok := item.(*pyjson.Object)
+		d, ok := item.(*themejson.Object)
 		if !ok {
 			return nil
 		}
@@ -195,7 +195,7 @@ func diagnosticLines(value pyjson.Value) []string {
 			if v == nil {
 				return ""
 			}
-			return pyjson.Str(v)
+			return themejson.Str(v)
 		}
 		if field("message") == "" {
 			return nil
@@ -220,7 +220,7 @@ func diagnosticLines(value pyjson.Value) []string {
 }
 
 // AuthorContract returns the theme author contract printed by themecheck.
-func AuthorContract(ctx context.Context, tools Tools) (pyjson.Value, error) {
+func AuthorContract(ctx context.Context, tools Tools) (themejson.Value, error) {
 	checker, err := tools.Checker(ctx)
 	if err != nil {
 		return nil, err
@@ -233,43 +233,43 @@ func AuthorContract(ctx context.Context, tools Tools) (pyjson.Value, error) {
 		return nil, errors.New(orFailed(out.stdout + out.stderr))
 	}
 	invalid := errors.New("themecheck returned an invalid author contract")
-	value, err := pyjson.Loads(out.stdout)
+	value, err := themejson.Loads(out.stdout)
 	if err != nil {
 		return nil, invalid
 	}
-	contract, ok := value.(*pyjson.Object)
+	contract, ok := value.(*themejson.Object)
 	if !ok {
 		return nil, invalid
 	}
-	get := func(o *pyjson.Object, key string) pyjson.Value { v, _ := o.Get(key); return v }
-	if !pyjson.IsInt(get(contract, "schema_version"), 3) {
+	get := func(o *themejson.Object, key string) themejson.Value { v, _ := o.Get(key); return v }
+	if !themejson.IsInt(get(contract, "schema_version"), 3) {
 		return nil, invalid
 	}
 	for _, key := range []string{"ctx_needs", "setting_types", "hosted_actions"} {
-		if _, ok := get(contract, key).([]pyjson.Value); !ok {
+		if _, ok := get(contract, key).([]themejson.Value); !ok {
 			return nil, invalid
 		}
 	}
-	ctxObj, ok := get(contract, "ctx").(*pyjson.Object)
-	if !ok || !pyjson.IsInt(get(ctxObj, "schema_version"), 1) {
+	ctxObj, ok := get(contract, "ctx").(*themejson.Object)
+	if !ok || !themejson.IsInt(get(ctxObj, "schema_version"), 1) {
 		return nil, invalid
 	}
-	if _, ok := get(ctxObj, "definitions").(*pyjson.Object); !ok {
+	if _, ok := get(ctxObj, "definitions").(*themejson.Object); !ok {
 		return nil, invalid
 	}
-	roots, ok := get(ctxObj, "roots").([]pyjson.Value)
+	roots, ok := get(ctxObj, "roots").([]themejson.Value)
 	if !ok {
 		return nil, invalid
 	}
-	names := []pyjson.Value{}
+	names := []themejson.Value{}
 	for _, r := range roots {
-		root, ok := r.(*pyjson.Object)
+		root, ok := r.(*themejson.Object)
 		if !ok {
 			return nil, invalid
 		}
 		names = append(names, get(root, "name"))
 	}
-	if !pyjson.Equal(names, get(contract, "ctx_needs")) {
+	if !themejson.Equal(names, get(contract, "ctx_needs")) {
 		return nil, invalid
 	}
 	return contract, nil

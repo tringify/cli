@@ -1,4 +1,4 @@
-package themekit
+package themebuild
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tringify/cli/internal/pyjson"
+	"github.com/tringify/cli/internal/themejson"
 )
 
 // App blocks are checked, inspected and previewed by the theme tools
@@ -81,7 +81,7 @@ func CheckAppBlocks(ctx context.Context, config []byte, tools Tools) (int, []Blo
 // AppBlockContext returns the sample data each block that lists page
 // renders with. With a theme root, the theme's demo content is used;
 // otherwise the built-in sample catalog.
-func AppBlockContext(ctx context.Context, config []byte, root, page, entity, preset string, tools Tools) (pyjson.Value, error) {
+func AppBlockContext(ctx context.Context, config []byte, root, page, entity, preset string, tools Tools) (themejson.Value, error) {
 	args := []string{"--context", "--page", page, "--base", "/preview"}
 	if entity != "" {
 		args = append(args, "--entity", entity)
@@ -105,18 +105,18 @@ func AppBlockContext(ctx context.Context, config []byte, root, page, entity, pre
 	if err != nil {
 		return nil, err
 	}
-	value, err := pyjson.Loads(stdout)
+	value, err := themejson.Loads(stdout)
 	invalid := errors.New("theme preview renderer returned an invalid app block context")
 	if err != nil {
 		return nil, invalid
 	}
-	payload, ok := value.(*pyjson.Object)
+	payload, ok := value.(*themejson.Object)
 	if !ok {
 		return nil, invalid
 	}
 	version, _ := payload.Get("schema_version")
 	blocks, _ := payload.Get("blocks")
-	if _, isList := blocks.([]pyjson.Value); !pyjson.IsInt(version, 1) || !isList {
+	if _, isList := blocks.([]themejson.Value); !themejson.IsInt(version, 1) || !isList {
 		return nil, invalid
 	}
 	return payload, nil

@@ -1,4 +1,4 @@
-package theme
+package themeops
 
 import (
 	"archive/zip"

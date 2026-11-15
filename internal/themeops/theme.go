@@ -1,6 +1,6 @@
-// Package theme implements the theme workflow: create from the starter,
+// Package themeops implements the theme workflow: create from the starter,
 // package, push to a store, and publish a version to a listing.
-package theme
+package themeops
 
 import (
 	"archive/tar"
