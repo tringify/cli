@@ -26,7 +26,7 @@ func renderFailure(out output, fallback string) error {
 
 // InspectContext packages the theme and returns the exact sample CTX the
 // preview renderer gives one page.
-func InspectContext(ctx context.Context, root, page, entity, preset string, tools Tools) (themejson.Value, error) {
+func InspectContext(ctx context.Context, root, page, state, entity, preset string, tools Tools) (themejson.Value, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
@@ -52,6 +52,9 @@ func InspectContext(ctx context.Context, root, page, entity, preset string, tool
 		return nil, err
 	}
 	args := []string{"--bundle", bundle, "--context", "--page", page, "--base", "/preview"}
+	if state != "" {
+		args = append(args, "--state", state)
+	}
 	if entity != "" {
 		args = append(args, "--entity", entity)
 	}
