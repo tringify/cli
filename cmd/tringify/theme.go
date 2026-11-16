@@ -57,9 +57,9 @@ const (
 )
 
 func (a *app) themeInit(ctx context.Context, args []string) error {
-	fs := newFlags("theme init [DIR] [--name NAME] [--from SOURCE]", "Create a new theme from the Tringify starter theme (github.com/tringify/theme-starter), or from a local theme with --from. The new theme is built and validated before DIR is created.")
+	fs := newFlags("theme init [DIR] [--name NAME] [--from SOURCE]", "Create a new theme from Canvas, Tringify's default theme (github.com/tringify/canvas), or from a local theme with --from. The new theme gets its own name, version 1.0.0, draft status and a new README; it is built and validated before DIR is created.")
 	name := fs.String("name", "", "theme display name (default: derived from DIR)")
-	from := fs.String("from", "", "local theme directory to start from (default: download the starter theme)")
+	from := fs.String("from", "", "local theme directory to start from (default: download Canvas, the default theme)")
 	checker := fs.String("checker", "", checkerHelp)
 	positional, err := parse(fs, args)
 	if err != nil {
@@ -91,13 +91,13 @@ func (a *app) themeInit(ctx context.Context, args []string) error {
 	}
 	source := *from
 	if source == "" {
-		a.println("Downloading the starter theme…")
-		starter, cleanup, err := themeops.DownloadStarter(ctx, &http.Client{Timeout: 2 * time.Minute})
+		a.println("Downloading Canvas, the default theme…")
+		canvas, cleanup, err := themeops.DownloadCanvas(ctx, &http.Client{Timeout: 2 * time.Minute})
 		if err != nil {
 			return err
 		}
 		defer cleanup()
-		source = starter
+		source = canvas
 	}
 	if _, err := themebuild.Initialize(ctx, source, dest, *name, a.tools(*checker, "")); err != nil {
 		return fmt.Errorf("theme initialization failed: %w", err)

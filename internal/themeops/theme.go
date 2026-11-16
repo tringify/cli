@@ -1,4 +1,4 @@
-// Package themeops implements the theme workflow: create from the starter,
+// Package themeops implements the theme workflow: create from Canvas,
 // package, push to a store, and publish a version to a listing.
 package themeops
 
@@ -20,19 +20,20 @@ import (
 	"strings"
 )
 
-// StarterArchive is the starter theme source.
-var StarterArchive = "https://codeload.github.com/tringify/theme-starter/tar.gz/refs/heads/main"
+// CanvasArchive is the source of Canvas, Tringify's default theme, which new
+// themes are created from.
+var CanvasArchive = "https://codeload.github.com/tringify/canvas/tar.gz/refs/heads/main"
 
-// DownloadStarter fetches and unpacks the starter theme into a new temporary
-// directory and returns the theme root inside it.
-func DownloadStarter(ctx context.Context, client *http.Client) (string, func(), error) {
-	return DownloadArchive(ctx, client, StarterArchive, "the starter theme")
+// DownloadCanvas fetches and unpacks Canvas into a new temporary directory
+// and returns the theme root inside it.
+func DownloadCanvas(ctx context.Context, client *http.Client) (string, func(), error) {
+	return DownloadArchive(ctx, client, CanvasArchive, "Canvas, the default theme")
 }
 
 // DownloadArchive fetches and unpacks a GitHub source archive into a new
 // temporary directory and returns its root directory. what names it in errors.
 func DownloadArchive(ctx context.Context, client *http.Client, archiveURL, what string) (string, func(), error) {
-	work, err := os.MkdirTemp("", "tringify-starter-")
+	work, err := os.MkdirTemp("", "tringify-download-")
 	if err != nil {
 		return "", nil, err
 	}
@@ -79,17 +80,17 @@ func untar(r io.Reader, dest string) (string, error) {
 			continue // GitHub archives start with a pax global header.
 		}
 		if strings.Contains(h.Name, "..") {
-			return "", fmt.Errorf("unsafe path %q in the starter archive", h.Name)
+			return "", fmt.Errorf("unsafe path %q in the downloaded archive", h.Name)
 		}
 		name := filepath.Clean(filepath.FromSlash(h.Name))
 		if name == "." || filepath.IsAbs(name) {
-			return "", fmt.Errorf("unsafe path %q in the starter archive", h.Name)
+			return "", fmt.Errorf("unsafe path %q in the downloaded archive", h.Name)
 		}
 		top := strings.SplitN(name, string(os.PathSeparator), 2)[0]
 		if root == "" {
 			root = top
 		} else if top != root {
-			return "", errors.New("unexpected starter archive layout")
+			return "", errors.New("unexpected downloaded archive layout")
 		}
 		target := filepath.Join(dest, name)
 		switch h.Typeflag {
@@ -117,7 +118,7 @@ func untar(r io.Reader, dest string) (string, error) {
 		}
 	}
 	if root == "" {
-		return "", errors.New("the starter archive is empty")
+		return "", errors.New("the downloaded archive is empty")
 	}
 	return filepath.Join(dest, root), nil
 }

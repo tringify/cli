@@ -32,7 +32,7 @@ Account:
   whoami                Show who you are signed in as
 
 Themes:
-  theme init [DIR]      Create a theme from the starter theme
+  theme init [DIR]      Create a theme from Canvas, the default theme
   theme preview [DIR]   Preview the theme locally with sample content
   theme build [DIR]     Compile src/sections into sections/*.vasc
   theme check [DIR]     Validate the theme

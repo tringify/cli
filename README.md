@@ -1,6 +1,6 @@
 # Tringify CLI
 
-The `tringify` command builds and ships Tringify themes and apps from your terminal. For themes: create one from the starter, preview it with sample content, add it to a development store, and publish versions to your theme listing. For apps: start a project from the app starter, keep the app's configuration in `tringify.app.json`, and release versions.
+The `tringify` command builds and ships Tringify themes and apps from your terminal. For themes: create one from Canvas, the default theme, preview it with sample content, add it to a development store, and publish versions to your theme listing. For apps: start a project from the app starter, keep the app's configuration in `tringify.app.json`, and release versions.
 
 Full documentation: [dev-docs.tringify.com/cli](https://dev-docs.tringify.com/cli/).
 
@@ -44,7 +44,7 @@ The CLI looks for a newer theme tools release at most every 15 minutes and keeps
 
 ```sh
 tringify login                       # choose your developer organization
-tringify theme init my-theme         # create a theme from the starter
+tringify theme init my-theme         # create a theme from Canvas, the default theme
 cd my-theme
 tringify theme preview               # live preview with sample content
 tringify theme check                 # validate
@@ -84,7 +84,7 @@ tringify app create --name "My app" --type standard --distribution private
                                         # prints the app ID, client ID and client secret (shown once)
 tringify app init --app APP_ID          # project from the app starter, with tringify.app.json
 # edit tringify.app.json: scopes, webhook URL, admin URL, events
-tringify app block preview              # the example block, blocks/instalments.vasc, in the starter theme
+tringify app block preview              # the example block, blocks/instalments.vasc, in Canvas, the default theme
 tringify app config check               # the platform's checks, without pushing
 tringify app config push                # runs the check, shows what changes, then replaces the draft
 tringify app webhook test               # sends a signed app.test webhook
@@ -157,7 +157,7 @@ A `template` block is markup only: the storefront renders it into the page and c
 ```sh
 tringify app block check                # FILE:LINE: problems, as the platform would refuse them
 tringify app block context --page product   # the data each block receives on a product page
-tringify app block preview              # the blocks in the starter theme, rebuilt as you edit
+tringify app block preview              # the blocks in Canvas, the default theme, rebuilt as you edit
 tringify app block preview --theme ../my-theme --page collection
 ```
 
@@ -171,7 +171,7 @@ tringify app block preview --theme ../my-theme --page collection
 | `login --store` | Signs in to a store. `theme push`, `theme dev` and `theme pull` do this for you when needed. |
 | `logout` | Signs out of the developer organization and revokes the CLI's access. `--store ID` signs out of one store; `--all` signs out everywhere. |
 | `whoami` | Shows the organization and stores you are signed in to and the access each login has. |
-| `theme init [DIR] [--name NAME] [--from SOURCE]` | Creates a theme from [theme-starter](https://github.com/tringify/theme-starter), or from a local theme directory with `--from`, then builds and validates it. `DIR` must not exist; nothing is created if validation fails. |
+| `theme init [DIR] [--name NAME] [--from SOURCE]` | Creates a theme from [Canvas](https://github.com/tringify/canvas), Tringify's default theme, or from a local theme directory with `--from`, then builds and validates it. The new theme gets its own name (`--name`, default: from `DIR`), version 1.0.0, draft status and a new README; the source's README, changelog, CI workflows, scripts and git history are not copied. `DIR` must not exist; nothing is created if validation fails. |
 | `theme preview [DIR] [--port 9292] [--preset NAME] [--host ADDRESS]` | Serves a local preview with sample content at `127.0.0.1:9292` and rebuilds when you edit sources. A failed edit shows the error and keeps the last good page. |
 | `theme build [DIR]` | Compiles `src/sections/<name>/` into `sections/<name>.vasc` and updates the section list in `theme.json`. |
 | `theme check [DIR] [--mode sealed\|development]` | Validates the compiled theme, as it is, with the same rules used on upload. Run `theme build` first after editing `src/`. Sealed mode, the default, also needs a non-empty template for every page, including the Gift Card page (`templates/gift_card.json`); `--mode development` leaves that out while you build one page at a time. |
@@ -203,7 +203,7 @@ tringify app block preview --theme ../my-theme --page collection
 | `app config push [--file PATH] [--yes]` | Runs `app config check` and pushes nothing if it finds a problem, then shows the fields that differ from the draft and, once you confirm, replaces the draft with the file and the block sources it names. Unknown fields are refused. The saved values are written back to the files when the platform normalizes them, for example sorting scopes. |
 | `app block check [--file PATH]` | Checks the app's blocks with the rules the platform applies when the configuration is pushed, and prints each problem as `FILE:LINE: message`. |
 | `app block context [--page PAGE] [--theme DIR] [--entity HANDLE]` | Prints the sample data each block that lists the page receives: the page's data cut to the block's `ctx_needs`. Uses the built-in sample catalog, or a theme's demo content with `--theme`. |
-| `app block preview [--theme DIR] [--page PAGE] [--after TYPE] [--port 9292]` | Serves a local preview of the theme (default: the [starter theme](https://github.com/tringify/theme-starter), downloaded as `theme init` does) with the app's blocks that list the page in its app block slot, after the theme block of type `--after` (default `price`). Blocks render as on a store: their mode's data only, the app markup policy, the page's app block budget and the `tf-ab-*` styles. Rebuilds when `tringify.app.json`, a block source or the theme changes. |
+| `app block preview [--theme DIR] [--page PAGE] [--after TYPE] [--port 9292]` | Serves a local preview of the theme (default: [Canvas](https://github.com/tringify/canvas), the default theme, downloaded as `theme init` does) with the app's blocks that list the page in its app block slot, after the theme block of type `--after` (default `price`). Blocks render as on a store: their mode's data only, the app markup policy, the page's app block budget and the `tf-ab-*` styles. Rebuilds when `tringify.app.json`, a block source or the theme changes. |
 | `app install-link [--store DOMAIN] [--draft] [--expires CHOICE] [--uses N]` | Prints a link that installs the app on a store. A private app installs its current draft; a marketplace app installs its published version, or with `--draft` its draft (development and transfer stores of your organization only). The expiry choices and the defaults for both flags come from the Developer API, the same as in the Developer Portal; an unknown `--expires` lists the choices. |
 | `app release [--bump patch\|minor\|major] [--store ID\|DOMAIN]... [--all] [--notes TEXT]` | Releases the draft. A marketplace app submits it as a new version (`--bump`): the listing needs an icon, at least one screenshot, a support email, and the app needs a published privacy policy and terms of service (`app listing show` lists what is missing); the submit also sends a signed `app.test` to the webhook URL and needs a 2xx answer; and a version identical to the published one is refused, since a version is only for configuration or listing changes (code changes go live when you deploy your own server). A private app sends it as an update to the installed stores you name by ID or domain, or with `--all` to every installed store that does not have it yet (the output says how many stores got it and whether any could not be updated); each store accepts it in its admin. Refuses while `tringify.app.json` or a block source differs from the draft, or the draft's blocks fail `app block check`. |
 | `app versions` | Lists the app's versions and their review status, or for a private app, the updates sent with their release notes and how many stores accepted each, have it waiting, or got a later version instead. |
