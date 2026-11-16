@@ -21,10 +21,40 @@ const (
 // Gitignore is written into every new theme.
 const Gitignore = "dist/\n.DS_Store\n__pycache__/\n.env\n.env.*\n"
 
+// InitialVersion is the version every new theme starts at.
+const InitialVersion = "1.0.0"
+
+// readme is the README every new theme starts with. The source's README
+// describes the source theme (its name, release history and the tooling of
+// its own repository), so it is never copied.
+func readme(name string) string {
+	return "# " + name + `
+
+A Tringify storefront theme.
+
+## Layout
+
+- ` + "`src/sections/<name>/`" + ` - section source (` + "`body.html`, `style.css`, `schema.json`" + `). Edit these, not ` + "`sections/*.vasc`" + `.
+- ` + "`src/_shared.css`" + ` - styles prepended to every section by the build.
+- ` + "`blocks/`, `templates/`, `config/`, `locales/`, `assets/`, `demo/`" + ` - theme blocks, page templates, settings and presets, translations, images and the preview catalog.
+
+## Build and check
+
+` + "```bash" + `
+tringify theme build .
+tringify theme check .
+tringify theme preview
+tringify theme package
+` + "```" + `
+`
+}
+
 var sourceParts = map[string]bool{"body.html": true, "style.css": true, "schema.json": true}
 
 // sourceFiles lists what a new theme copies from its source: the runtime
-// bundle, editable section sources, and README, LICENSE and NOTICE files.
+// bundle, editable section sources, and LICENSE and NOTICE files. Nothing
+// else is copied: no README, changelog, release notes, CI workflows, scripts
+// or git history.
 func sourceFiles(root string) ([]string, error) {
 	var files []string
 	var collect func(path string) error
@@ -85,7 +115,7 @@ func sourceFiles(root string) ([]string, error) {
 	var top []string
 	for _, e := range entries {
 		n := e.Name()
-		if n == "README.md" || n == "NOTICE" || n == "LICENSE" || strings.HasPrefix(n, "LICENSE.") || strings.HasPrefix(n, "NOTICE.") {
+		if n == "NOTICE" || n == "LICENSE" || strings.HasPrefix(n, "LICENSE.") || strings.HasPrefix(n, "NOTICE.") {
 			top = append(top, n)
 		}
 	}
@@ -136,7 +166,9 @@ func ValidName(name string) (string, error) {
 }
 
 // Initialize creates destination as an editable copy of the local theme
-// source, named name, built and validated. Nothing is created if any step
+// source, built and validated. The copy is a new theme: it is named name,
+// starts at InitialVersion as a draft, and gets its own README, so it keeps
+// nothing that identifies the source theme. Nothing is created if any step
 // fails, and the source is never modified. It returns the section count.
 func Initialize(ctx context.Context, source, destination, name string, tools Tools) (int, error) {
 	name, err := ValidName(name)
@@ -211,6 +243,7 @@ func Initialize(ctx context.Context, source, destination, name string, tools Too
 		return 0, errors.New("theme.json must contain an object")
 	}
 	manifest.Set("name", themejson.String(name))
+	manifest.Set("version", themejson.String(InitialVersion))
 	manifest.Set("status", themejson.String("draft"))
 	if err := os.WriteFile(manifestPath, []byte(themejson.Dumps(manifest)+"\n"), 0o644); err != nil {
 		return 0, err
@@ -238,6 +271,9 @@ func Initialize(ctx context.Context, source, destination, name string, tools Too
 		}
 	}
 	if err := os.WriteFile(filepath.Join(staged, ".gitignore"), []byte(Gitignore), 0o644); err != nil {
+		return 0, err
+	}
+	if err := os.WriteFile(filepath.Join(staged, "README.md"), []byte(readme(name)), 0o644); err != nil {
 		return 0, err
 	}
 
