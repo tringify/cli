@@ -33,7 +33,7 @@ func (a *app) themeDocs(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "push" {
 		args = args[1:]
 	}
-	fs := newFlags("theme docs [push] --listing ID [--draft] [DIR] | theme docs status --listing ID", "Publish the theme's documentation on themes-support.tringify.com/<slug>/docs from the .md files in DIR (default ./docs), the same format as `tringify app docs push`: one file per page, the file name (without .md) is the page address, and each file starts with front matter (---, title: ..., order: N, ---). The pages are saved as the draft and submitted; Tringify reviews them before they go live (Tringify's own themes publish at once). --draft only saves the draft.")
+	fs := newFlags("theme docs [push] --listing ID [--draft] [DIR] | theme docs status --listing ID", "Publish the theme's documentation on themes-support.tringify.com/<slug>/docs from the .md files in DIR (default ./docs), the same format as `tringify app docs push`: one file per page, the file name (without .md) is the page address, and each file starts with front matter (---, title: ..., order: N, ---). The pages are saved as the draft and submitted; Tringify reviews them before they go live. --draft only saves the draft.")
 	listing := fs.String("listing", "", "theme listing ID (see `tringify theme listings`)")
 	draftOnly := fs.Bool("draft", false, "save the draft without submitting it")
 	rest, err := parse(fs, args)

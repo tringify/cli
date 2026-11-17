@@ -1,8 +1,8 @@
 // Package themebuild builds, validates, packages and previews Tringify themes.
 //
-// It is a Go port of the Python theme tools (github.com/tringify/theme-tools)
-// and keeps their file layout, rules and messages. Validation and preview
-// rendering run the prebuilt themecheck and theme-preview-render binaries.
+// Validation and preview rendering run the prebuilt themecheck and
+// theme-preview-render binaries from the theme tools
+// (github.com/tringify/theme-tools).
 package themebuild
 
 import (
@@ -230,7 +230,7 @@ func isDir(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-// errorf keeps OS errors short: "open src/_shared.css: no such file or
+// osError keeps OS errors short: "open src/_shared.css: no such file or
 // directory" rather than the absolute temporary path of a staged copy.
 func osError(root string, err error) error {
 	var pathErr *fs.PathError

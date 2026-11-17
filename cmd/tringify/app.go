@@ -87,13 +87,13 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 	return fmt.Errorf("unknown app command %q", args[0])
 }
 
-// appAccess explains a refusal from a login made before the command's access
-// was part of the sign-in: a missing scope is refused as PERMISSION_DENIED,
-// like a role without the permission.
+// appAccess explains a refusal that a login without the command's access
+// causes: a missing scope is refused as PERMISSION_DENIED, like a role
+// without the permission.
 func appAccess(err error) error {
 	var apiErr *devapi.Error
 	if errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden && (apiErr.Code == "FORBIDDEN" || apiErr.Code == "PERMISSION_DENIED") {
-		return fmt.Errorf("%w. If you signed in before this command was added, run `tringify login` again to grant its access", err)
+		return fmt.Errorf("%w. If your role allows this, run `tringify login` again to grant the CLI its access", err)
 	}
 	return err
 }

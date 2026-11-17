@@ -5,8 +5,8 @@
 // only what changed: object keys keep their order, integers keep every digit,
 // floats are written in their shortest round-trip form, and non-ASCII text is
 // escaped unless asked otherwise. The format, the str/repr/== helpers and the
-// parse error messages follow Python's json module, which the theme format was
-// first defined with.
+// parse error messages follow Python's json module, so existing theme files
+// and their error messages stay the same.
 package themejson
 
 import (

@@ -38,7 +38,7 @@ func (a *app) appInit(ctx context.Context, args []string) error {
 		return err
 	}
 	if *appFlag == "" {
-		return errors.New("--app is required. Create the app in the Developer Portal, then see `tringify app list`")
+		return errors.New("--app is required. Create the app with `tringify app create`; `tringify app list` lists your apps")
 	}
 	if len(positional) > 1 {
 		return fmt.Errorf("unexpected argument %q", positional[1])
@@ -184,7 +184,7 @@ func writeStarterSettings(dest, appID, clientID, slug string, config []byte) (bo
 		return false, err
 	}
 	vars := "# Local secrets for `npm run dev`. Never commit this file.\n" +
-		"# Client secret: Developer Portal > Apps > your app > Credentials.\n" +
+		"# Client secret: printed once by `tringify app create`; for a new one run `tringify app secret rotate`.\n" +
 		"TRINGIFY_CLIENT_SECRET=\n" +
 		"# Webhook signing secret: Developer Portal > Apps > your app > Webhooks > Signing Key.\n" +
 		"TRINGIFY_WEBHOOK_SECRET=\n" +

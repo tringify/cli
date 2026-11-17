@@ -18,8 +18,8 @@ import (
 	"github.com/tringify/cli/internal/appconfig"
 )
 
-// Every app has three documents Tringify hosts on its support site: a
-// privacy policy, terms of service and documentation pages. Each is saved as
+// Every app has four documents Tringify hosts on its support site: a
+// privacy policy, terms of service, documentation pages and an API reference. Each is saved as
 // a draft, submitted for review and published as a numbered version. The
 // limits a document must meet come from the Developer API (GET /site).
 
@@ -209,8 +209,7 @@ func (a *app) appSitePush(ctx context.Context, kind string, args []string) error
 }
 
 // readDocsPages reads the pages of a docs or API reference folder in their
-// order, checked
-// against the server's limits.
+// order, checked against the server's limits.
 func readDocsPages(dir string, limits siteLimits) ([]sitePage, error) {
 	slugPattern, err := regexp.Compile(limits.PageSlugPattern)
 	if err != nil {

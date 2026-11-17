@@ -18,7 +18,7 @@ import (
 // App Store listing: the text, support email, icon and screenshots merchants
 // see. A listing change reaches the App Store with the app's next release.
 // The privacy policy, terms and docs are hosted by Tringify: `tringify app
-// privacy|terms|docs push`.
+// privacy|terms|docs|api push`.
 
 var appListingFields = []string{"tagline", "short_description", "description", "support_email"}
 
@@ -161,8 +161,9 @@ func (a *app) updateAppListing(ctx context.Context, api devAPIDoer, appID string
 	if err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID), nil, &current); err != nil {
 		return err
 	}
-	// The listing update replaces every field it is sent and clears the ones
-	// it is not, so start from the listing as it is and change only what was asked.
+	// The listing update replaces the text, icon and screenshots and clears
+	// any it is not sent (the category changes only when given), so start
+	// from the listing as it is and change only what was asked.
 	body := map[string]any{}
 	for _, key := range appListingFields {
 		body[key] = str(current[key])

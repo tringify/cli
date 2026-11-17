@@ -4,7 +4,7 @@
    links point at panels inside the root (href="#id", or this page's URL with #id). Links to other pages are left alone. The open panel follows the
    address bar (#orders, #addresses …), is remembered for the visit so a saved form returns to its tab, and opens when
    a link points at something inside it. The active link gets aria-current="page" and .is-active for the theme to
-   style. Without JS every panel shows, as before. */
+   style. Without JS every panel shows. */
 (function () {
   function init(root) {
     if (root.__tftabs) return; root.__tftabs = true;

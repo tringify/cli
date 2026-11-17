@@ -13,9 +13,6 @@ import (
 	"github.com/tringify/cli/internal/themejson"
 )
 
-// Modes accepted by themecheck.
-var Modes = []string{"sealed", "development"}
-
 // ValidMode reports whether mode is a themecheck mode.
 func ValidMode(mode string) bool { return mode == "sealed" || mode == "development" }
 

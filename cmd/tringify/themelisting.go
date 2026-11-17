@@ -264,7 +264,7 @@ func (a *app) themeUpdate(ctx context.Context, args []string) error {
 }
 
 func (a *app) themeSubmit(ctx context.Context, args []string) error {
-	fs := newFlags("theme submit --listing ID", "Submit a listing for Theme Store review. Listings from the Tringify organization are approved straight away.")
+	fs := newFlags("theme submit --listing ID", "Submit a listing for Theme Store review.")
 	listing := fs.String("listing", "", "theme listing ID (see `tringify theme listings`)")
 	if _, err := parse(fs, args); err != nil {
 		return err

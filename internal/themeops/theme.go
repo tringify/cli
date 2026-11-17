@@ -159,7 +159,7 @@ type Source struct {
 // uncommitted or untracked (non-ignored) change under root's repository.
 func GitSource(ctx context.Context, root string) (*Source, error) {
 	if _, err := exec.LookPath("git"); err != nil {
-		return nil, errors.New("git is required to publish, so the version records its source commit")
+		return nil, errors.New("git is required to publish: a version is built from a clean commit")
 	}
 	run := func(args ...string) (string, error) {
 		cmd := exec.CommandContext(ctx, "git", args...)

@@ -19,7 +19,7 @@ const (
 )
 
 // Gitignore is written into every new theme.
-const Gitignore = "dist/\n.DS_Store\n__pycache__/\n.env\n.env.*\n"
+const Gitignore = "dist/\n.DS_Store\n.env\n.env.*\n"
 
 // InitialVersion is the version every new theme starts at.
 const InitialVersion = "1.0.0"

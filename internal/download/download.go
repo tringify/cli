@@ -16,7 +16,7 @@ import (
 
 const maxPackageBytes = 256 << 20
 
-// Link is the gateway's theme export response. Authentication is in the URL;
+// Link is a short-lived theme package download link. Authentication is in the URL;
 // account credentials must never be sent to the object store.
 type Link struct {
 	DownloadURL string `json:"download_url"`

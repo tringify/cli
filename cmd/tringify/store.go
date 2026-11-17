@@ -28,8 +28,7 @@ func (a *app) store(ctx context.Context, args []string) error {
 	return fmt.Errorf("unknown store command %q", args[0])
 }
 
-// devStoreAccess explains a refusal from a login made before development
-// store access was part of the sign-in.
+// devStoreAccess explains a refusal as missing development store access.
 func devStoreAccess(err error) error {
 	var apiErr *devapi.Error
 	if errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden {
@@ -71,7 +70,7 @@ func (a *app) storeList(ctx context.Context, args []string) error {
 	}
 	list := listAt(stores, "")
 	if len(list) == 0 {
-		a.printf("No development stores in %s. Create one with `tringify store create --name NAME`.\n", session.Account.Target.Name)
+		a.printf("No development stores in %s. Create one with `tringify store create --name NAME --country CC --currency CUR`.\n", session.Account.Target.Name)
 		return nil
 	}
 	for _, s := range list {

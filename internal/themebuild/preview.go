@@ -254,10 +254,10 @@ func (p *Preview) rebuild(ctx context.Context) (bool, error) {
 		routeValue, hasPath := page.Get("path")
 		fileValue, hasFile := page.Get("file")
 		if !hasPath {
-			return false, errors.New("'path'")
+			return false, errors.New("the renderer returned a preview page without a path")
 		}
 		if !hasFile {
-			return false, errors.New("'file'")
+			return false, errors.New("the renderer returned a preview page without a file")
 		}
 		route, ok := routeValue.(themejson.String)
 		if !ok || !strings.HasPrefix(string(route), p.Base+"/") || strings.ContainsAny(string(route), "?#") {
@@ -333,7 +333,7 @@ func (p *Preview) rebuild(ctx context.Context) (bool, error) {
 	p.errText = ""
 	p.mu.Unlock()
 	if !hasName {
-		return true, errors.New("'name'")
+		return true, errors.New("the renderer returned a manifest without a name")
 	}
 	fmt.Fprintf(p.Out, "Preview updated: %s · %d pages\n", themejson.Str(name), len(pages))
 	return true, nil
@@ -350,17 +350,6 @@ func (p *Preview) State() string {
 	state.Set("name", p.name)
 	state.Set("pages", p.pages)
 	return themejson.Compact(state)
-}
-
-// Snapshot returns the current snapshot for tests.
-func (p *Preview) Snapshot() map[string][]byte {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	out := map[string][]byte{}
-	for k, v := range p.snapshot {
-		out[k] = v.data
-	}
-	return out
 }
 
 // Error returns the current build error, if any.
@@ -451,7 +440,7 @@ func CheckHost(host string, port int) error {
 		return fmt.Errorf("'%s' does not appear to be an IPv4 or IPv6 address", host)
 	}
 	if ip.To4() == nil || strings.Contains(host, ":") {
-		return errors.New("preview currently requires an IPv4 address")
+		return errors.New("preview requires an IPv4 address")
 	}
 	if port < 0 || port > 65535 {
 		return errors.New("port must be between 0 and 65535")
