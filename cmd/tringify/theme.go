@@ -7,13 +7,12 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/tringify/cli/internal/auth"
-	"github.com/tringify/cli/internal/devapi"
 	"github.com/tringify/cli/internal/themebinaries"
 	"github.com/tringify/cli/internal/themebuild"
 	"github.com/tringify/cli/internal/themejson"
@@ -351,14 +350,6 @@ func (a *app) themePush(ctx context.Context, args []string) error {
 	return nil
 }
 
-func (a *app) devAPI() (*devapi.Client, *auth.Session, error) {
-	session, err := a.session("organization", "")
-	if err != nil {
-		return nil, nil, err
-	}
-	return devapi.New(a.devAPIBase, session.Account.Target.ID, session, version), session, nil
-}
-
 func (a *app) themeListings(ctx context.Context, args []string) error {
 	fs := newFlags("theme listings", "List the theme listings in your developer organization.")
 	if _, err := parse(fs, args); err != nil {
@@ -385,22 +376,43 @@ func (a *app) themeListings(ctx context.Context, args []string) error {
 }
 
 func (a *app) themePublish(ctx context.Context, args []string) error {
-	fs := newFlags("theme publish --listing ID --version X.Y.Z [--yes] [DIR]", "Package the theme from a clean git checkout and publish it as a new version of an existing listing. It first shows the files that change compared with the newest published version and asks before publishing. It must run from a clean commit; the commit is shown in the output, not in the release notes.")
-	listing := fs.String("listing", "", "theme listing ID (see `tringify theme listings`)")
-	versionFlag := fs.String("version", "", "version to publish, for example 1.2.0")
+	fs := newFlags("theme publish --listing ID --version X.Y.Z [--notes TEXT | --notes-file FILE] [--yes] [--oidc] [DIR]", "Package the theme from a clean git checkout and publish it as a new version of an existing listing. It first shows the files that change compared with the newest published version and asks before publishing; --yes publishes without asking (needed when not in a terminal and with trusted publishing). It must run from a clean commit; the commit is shown in the output, not in the release notes. In a GitHub Actions job with `permissions: id-token: write` (or with --oidc) it uses trusted publishing: no login, and --listing is optional because the publishing token names the listing.")
+	listing := fs.String("listing", "", "theme listing ID (see `tringify theme listings`); optional with trusted publishing")
+	versionFlag := fs.String("version", "", "version to publish, for example 1.2.0; a leading v (v1.2.0, a tag name) is ignored")
 	notes := fs.String("notes", "", "release notes")
+	notesFile := fs.String("notes-file", "", "read the release notes from this file (- for standard input), for example an annotated tag's message")
 	breaking := fs.Bool("breaking", false, "mark the version as containing breaking changes")
-	installStore := fs.String("install-store", "", "also install the published version into this organization development store")
-	yes := fs.Bool("yes", false, "publish without showing the changes and asking first (needed when not in a terminal)")
+	installStore := fs.String("install-store", "", "also install the published version into this organization development store (not with trusted publishing)")
+	yes := fs.Bool("yes", false, "publish without showing the changes and asking first (needed when not in a terminal and with trusted publishing)")
+	oidcFlag(fs)
 	positional, err := parse(fs, args)
 	if err != nil {
 		return err
 	}
-	if *listing == "" || *versionFlag == "" {
-		return errors.New("--listing and --version are required")
+	*versionFlag = trimV(*versionFlag)
+	if *versionFlag == "" {
+		return errors.New("--version is required")
 	}
 	if !themeops.ValidVersion(*versionFlag) {
 		return fmt.Errorf("%q is not a version like 1.2.0", *versionFlag)
+	}
+	releaseNotes, err := a.readNotes(*notes, *notesFile)
+	if err != nil {
+		return err
+	}
+	trusted, err := a.trusted()
+	if err != nil {
+		return err
+	}
+	if trusted && *installStore != "" {
+		return errors.New("--install-store does not work with trusted publishing: a publishing token can only publish. Install the version from your own computer with a login")
+	}
+	// Ask nothing that cannot be answered, before any work is done.
+	if !*yes && !a.canAsk() {
+		if trusted {
+			return errors.New("trusted publishing publishes without asking: pass --yes")
+		}
+		return errors.New("not running in a terminal. Pass --yes to publish without confirming")
 	}
 	root, err := rootArg(positional)
 	if err != nil {
@@ -413,17 +425,21 @@ func (a *app) themePublish(ctx context.Context, args []string) error {
 	if source.Dirty {
 		return errors.New("the git work tree has uncommitted or untracked changes. Commit or stash them so the published version matches a commit")
 	}
+	listingID, err := a.themeListing(ctx, *listing)
+	if err != nil {
+		return err
+	}
 	api, session, err := a.devAPI()
 	if err != nil {
 		return err
 	}
 	if !*yes {
-		latest, ok, err := resolveVersion(ctx, api, *listing, "")
+		latest, ok, err := resolveVersion(ctx, api, listingID, "")
 		if err != nil {
 			return err
 		}
 		if ok {
-			changes, err := a.compareWithVersion(ctx, api, *listing, latest, root)
+			changes, err := a.compareWithVersion(ctx, api, listingID, latest, root)
 			if err != nil {
 				return err
 			}
@@ -448,7 +464,7 @@ func (a *app) themePublish(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	a.printf("Uploading %s %s from commit %s to %s…\n", name, *versionFlag, source.Commit[:12], session.Account.Target.Name)
+	a.printf("Uploading %s %s from commit %s to %s…\n", name, *versionFlag, source.Commit[:12], a.organizationName(ctx, session))
 	var grant upload.Grant
 	if err := api.Do(ctx, http.MethodPost, "/org/themes/upload", map[string]any{"original_filename": filepath.Base(bundle), "mime_type": "application/zip", "size_bytes": info.Size()}, &grant); err != nil {
 		return err
@@ -467,8 +483,8 @@ func (a *app) themePublish(ctx context.Context, args []string) error {
 		return err
 	}
 	var published map[string]any
-	body := map[string]any{"version": *versionFlag, "changelog": themeops.Changelog(*notes), "is_breaking": *breaking, "upload_id": uploadID}
-	if err := api.Do(ctx, http.MethodPost, "/org/themes/"+*listing+"/versions", body, &published); err != nil {
+	body := map[string]any{"version": *versionFlag, "changelog": themeops.Changelog(releaseNotes), "is_breaking": *breaking, "upload_id": uploadID}
+	if err := api.Do(ctx, http.MethodPost, "/org/themes/"+url.PathEscape(listingID)+"/versions", body, &published); err != nil {
 		return err
 	}
 	versionID := str(published["version_id"])
@@ -477,7 +493,7 @@ func (a *app) themePublish(ctx context.Context, args []string) error {
 		if versionID == "" {
 			return errors.New("published, but the response had no version ID to install")
 		}
-		if err := api.Do(ctx, http.MethodPost, "/org/themes/"+*listing+"/versions/"+versionID+"/install", map[string]any{"store_id": *installStore}, nil); err != nil {
+		if err := api.Do(ctx, http.MethodPost, "/org/themes/"+url.PathEscape(listingID)+"/versions/"+url.PathEscape(versionID)+"/install", map[string]any{"store_id": *installStore}, nil); err != nil {
 			return fmt.Errorf("published, but installing into %s failed: %w", *installStore, err)
 		}
 		a.printf("Installed it into store %s as an unpublished theme.\n", *installStore)

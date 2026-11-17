@@ -93,6 +93,11 @@ func (a *app) appCommand(ctx context.Context, args []string) error {
 func appAccess(err error) error {
 	var apiErr *devapi.Error
 	if errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden && (apiErr.Code == "FORBIDDEN" || apiErr.Code == "PERMISSION_DENIED") {
+		if publishingTokenInUse {
+			// A publishing token has no more access than the member who
+			// added its trusted publisher has now.
+			return fmt.Errorf("%w. A trusted publisher acts with the access of the member who added it; that member needs this permission in the organization", err)
+		}
 		return fmt.Errorf("%w. If your role allows this, run `tringify login` again to grant the CLI its access", err)
 	}
 	return err

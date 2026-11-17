@@ -187,11 +187,11 @@ func confirm(in io.Reader, out io.Writer, question string) (bool, error) {
 // confirmWith asks a yes/no question on a terminal. Without a terminal it
 // refuses with hint, so scripts must pass --yes.
 func confirmWith(in io.Reader, out io.Writer, question, hint string) (bool, error) {
-	if f, ok := in.(*os.File); ok {
-		info, err := f.Stat()
-		if err != nil || info.Mode()&os.ModeCharDevice == 0 {
-			return false, errors.New("not running in a terminal. " + hint)
-		}
+	if publishingTokenInUse {
+		return false, errors.New("this command would ask a question, but trusted publishing runs without one. " + hint)
+	}
+	if !interactive(in) {
+		return false, errors.New("not running in a terminal. " + hint)
 	}
 	fmt.Fprintf(out, "%s [y/N] ", question)
 	answer, err := bufio.NewReader(in).ReadString('\n')
@@ -201,4 +201,15 @@ func confirmWith(in io.Reader, out io.Writer, question, hint string) (bool, erro
 	}
 	answer = strings.ToLower(strings.TrimSpace(answer))
 	return answer == "y" || answer == "yes", nil
+}
+
+// interactive reports whether in is a terminal a question can be asked on.
+// A reader that is not a file (a test's input, say) counts as one.
+func interactive(in io.Reader) bool {
+	f, ok := in.(*os.File)
+	if !ok {
+		return true
+	}
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }

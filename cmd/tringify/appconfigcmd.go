@@ -94,10 +94,11 @@ func (a *app) writeConfig(file string, config []byte) error {
 }
 
 func (a *app) appConfigPush(ctx context.Context, args []string) error {
-	fs := newFlags("app config push [--file PATH]", "Replace the app's draft configuration with "+appconfig.FileName+" and the block sources it names. Runs `tringify app config check` first and pushes nothing if it finds a problem. Shows what changes and asks first. Fields left out of the file are cleared. The draft goes live only when you release it.")
+	fs := newFlags("app config push [--file PATH] [--yes] [--oidc]", "Replace the app's draft configuration with "+appconfig.FileName+" and the block sources it names. Runs `tringify app config check` first and pushes nothing if it finds a problem. Shows what changes and asks first; --yes replaces without asking (needed when not in a terminal and with trusted publishing). Fields left out of the file are cleared. The draft goes live only when you release it. In a GitHub Actions job with `permissions: id-token: write` (or with --oidc) it uses trusted publishing for the file's app_id.")
 	file := fs.String("file", appconfig.FileName, "configuration file")
-	yes := fs.Bool("yes", false, "replace without asking")
+	yes := fs.Bool("yes", false, "replace without asking (needed when not in a terminal and with trusted publishing)")
 	renderer := fs.String("renderer", "", rendererHelp)
+	oidcFlag(fs)
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
@@ -109,6 +110,7 @@ func (a *app) appConfigPush(ctx context.Context, args []string) error {
 	if appID == "" {
 		return fmt.Errorf("%s has no app_id. Run `tringify app config pull --app ID` to start from the app's current configuration", *file)
 	}
+	a.appPublishTarget(appID)
 	api, _, err := a.devAPI()
 	if err != nil {
 		return err
@@ -173,9 +175,10 @@ func checkConfig(ctx context.Context, api *devapi.Client, appID string, raw []by
 }
 
 func (a *app) appConfigCheck(ctx context.Context, args []string) error {
-	fs := newFlags("app config check [--file PATH]", "Check "+appconfig.FileName+" and the block sources it names without changing the draft: the app blocks first (see `tringify app block check`), then the whole configuration, which the Developer API checks exactly as it would on push, for example event delivery and the click IDs and cookies it declares under server_events.attribution. A problem is printed with the field it concerns, such as server_events.attribution.cookies. `app config push` runs this check first.")
+	fs := newFlags("app config check [--file PATH] [--oidc]", "Check "+appconfig.FileName+" and the block sources it names without changing the draft: the app blocks first (see `tringify app block check`), then the whole configuration, which the Developer API checks exactly as it would on push, for example event delivery and the click IDs and cookies it declares under server_events.attribution. A problem is printed with the field it concerns, such as server_events.attribution.cookies. `app config push` runs this check first. In a GitHub Actions job with `permissions: id-token: write` (or with --oidc) it uses trusted publishing for the file's app_id.")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	renderer := fs.String("renderer", "", rendererHelp)
+	oidcFlag(fs)
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
@@ -190,6 +193,7 @@ func (a *app) appConfigCheck(ctx context.Context, args []string) error {
 	if err := a.checkBlocks(ctx, *file, raw, *renderer); err != nil {
 		return err
 	}
+	a.appPublishTarget(appID)
 	api, _, err := a.devAPI()
 	if err != nil {
 		return err
