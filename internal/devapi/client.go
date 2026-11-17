@@ -1,5 +1,5 @@
 // Package devapi calls the Tringify Developer API with a developer
-// organization login.
+// organization login or a trusted publishing token.
 package devapi
 
 import (
@@ -113,7 +113,13 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte, 
 				return err
 			}
 			req.Header.Set("Authorization", "Bearer "+token)
-			req.Header.Set("X-Organization-ID", c.OrganizationID)
+			org := c.OrganizationID
+			// A trusted publishing token names its organization only once
+			// it has been exchanged.
+			if o, ok := c.Tokens.(interface{ OrganizationID() string }); ok && o.OrganizationID() != "" {
+				org = o.OrganizationID()
+			}
+			req.Header.Set("X-Organization-ID", org)
 		}
 		req.Header.Set("Accept", accept)
 		req.Header.Set("User-Agent", "tringify-cli/"+c.Version)

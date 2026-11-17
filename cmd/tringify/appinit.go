@@ -48,9 +48,10 @@ func (a *app) appInit(ctx context.Context, args []string) error {
 		return err
 	}
 	var details struct {
-		Name     string `json:"name"`
-		Slug     string `json:"slug"`
-		ClientID string `json:"client_id"`
+		Name         string `json:"name"`
+		Slug         string `json:"slug"`
+		ClientID     string `json:"client_id"`
+		Distribution string `json:"distribution"`
 	}
 	if err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(*appFlag), nil, &details); err != nil {
 		return appAccess(err)
@@ -86,6 +87,10 @@ func (a *app) appInit(ctx context.Context, args []string) error {
 		os.RemoveAll(dest)
 		return err
 	}
+	if err := writeReleaseWorkflow(dest, details.Distribution); err != nil {
+		os.RemoveAll(dest)
+		return err
+	}
 	a.printf(`Created %s for %s.
 
 Next:
@@ -101,7 +106,13 @@ Both are shown only once; keep them out of version control.
 
 %s holds the app's configuration and blocks/ its app block sources.
 Edit them, then run `+"`tringify app config push`"+`. The README explains deploying the Worker.
-`, dest, details.Name, dir, details.Name, appconfig.FileName)
+
+.github/workflows/release.yml releases the app from GitHub Actions when you push
+a tag such as v1.0.0, with trusted publishing (no stored secret). Before the
+first release, add a trusted publisher on the app in the Developer Portal
+(Apps > %s > Trusted publishing): your repository, workflow release.yml,
+environment release.
+`, dest, details.Name, dir, details.Name, appconfig.FileName, details.Name)
 	if added {
 		a.printf(`
 blocks/%s.vasc is an example template block: "or 3 interest-free payments
@@ -114,6 +125,80 @@ its entry from %s and the file if you do not want it.
 		a.printf("\nThe app already has a block named %s or the most blocks an app may have, so the example template block was not added.\n", starterBlockKey)
 	}
 	return nil
+}
+
+// appReleaseWorkflowHeader starts every app project's release workflow.
+const appReleaseWorkflowHeader = `# Releases the app when you push a tag such as v1.2.0:
+#   git tag -a v1.2.0 -m "What changed"   # the tag message becomes the release notes
+#   git push origin v1.2.0
+# Uses trusted publishing: no secret is stored. Before the first release, add a
+# trusted publisher on the app in the Developer Portal (Apps > your app >
+# Trusted publishing) with this repository, workflow file release.yml and
+# environment "release".
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - run: curl -fsSL https://raw.githubusercontent.com/tringify/cli/main/install.sh | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Release notes from the tag message
+        run: |
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+      - run: tringify app config push --yes
+`
+
+// appReleaseWorkflowMarketplace submits the tag's version for review and,
+// in a second job, publishes it. Review takes time: re-run the publish job
+// once Tringify has approved the version.
+const appReleaseWorkflowMarketplace = `      - run: tringify app release --version "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --yes
+      - if: hashFiles('docs/*.md') != ''
+        run: tringify app docs push --submit
+  # Fails while the version is in review: once Tringify approves it, re-run
+  # this job from the workflow run's page (it gets a fresh ID token).
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: curl -fsSL https://raw.githubusercontent.com/tringify/cli/main/install.sh | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: tringify app publish "$GITHUB_REF_NAME"
+`
+
+// appReleaseWorkflowPrivate releases the draft to every store that has the
+// app; Tringify numbers private updates, so the tag only starts it.
+const appReleaseWorkflowPrivate = `      - run: tringify app release --notes-file "$RUNNER_TEMP/notes.md" --yes
+      - if: hashFiles('docs/*.md') != ''
+        run: tringify app docs push --submit
+`
+
+// writeReleaseWorkflow adds .github/workflows/release.yml to a new app
+// project, for the app's distribution.
+func writeReleaseWorkflow(dest, distribution string) error {
+	workflow := appReleaseWorkflowHeader + appReleaseWorkflowMarketplace
+	if distribution == "private" {
+		workflow = appReleaseWorkflowHeader + appReleaseWorkflowPrivate
+	}
+	dir := filepath.Join(dest, ".github", "workflows")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "release.yml"), []byte(workflow), 0o644)
 }
 
 // withStarterBlock adds the example template block to a configuration as

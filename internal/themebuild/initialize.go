@@ -21,6 +21,45 @@ const (
 // Gitignore is written into every new theme.
 const Gitignore = "dist/\n.DS_Store\n.env\n.env.*\n"
 
+// ReleaseWorkflow is written into every new theme as
+// .github/workflows/release.yml: pushing a tag v* checks the theme and
+// publishes it as that version with trusted publishing (no stored secret),
+// then publishes its docs. It works once a trusted publisher for this
+// repository and workflow is added to the listing in the Developer Portal.
+const ReleaseWorkflow = `# Publishes the theme when you push a tag such as v1.2.0:
+#   git tag -a v1.2.0 -m "What changed"   # the tag message becomes the release notes
+#   git push origin v1.2.0
+# Uses trusted publishing: no secret is stored. Before the first release, add a
+# trusted publisher on the theme listing in the Developer Portal (Themes > your
+# listing > Trusted publishing) with this repository, workflow file release.yml
+# and environment "release".
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - run: curl -fsSL https://raw.githubusercontent.com/tringify/cli/main/install.sh | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: tringify theme check --mode sealed
+      - name: Release notes from the tag message
+        run: |
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+      - run: tringify theme publish --version "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --yes
+      - if: hashFiles('docs/*.md') != ''
+        run: tringify theme docs
+`
+
 // InitialVersion is the version every new theme starts at.
 const InitialVersion = "1.0.0"
 
@@ -45,6 +84,19 @@ tringify theme build .
 tringify theme check .
 tringify theme preview
 tringify theme package
+` + "```" + `
+
+## Release
+
+` + "`.github/workflows/release.yml`" + ` publishes the theme from GitHub Actions when you push a
+tag such as ` + "`v1.2.0`" + `, with trusted publishing: no token or secret is stored in the
+repository. Before the first release, add a trusted publisher on the theme listing in the
+Developer Portal (Themes > your listing > Trusted publishing): this repository, workflow
+` + "`release.yml`" + `, environment ` + "`release`" + `. Then:
+
+` + "```bash" + `
+git tag -a v1.2.0 -m "What changed in 1.2.0"   # the tag message becomes the release notes
+git push origin v1.2.0
 ` + "```" + `
 `
 }
@@ -274,6 +326,12 @@ func Initialize(ctx context.Context, source, destination, name string, tools Too
 		return 0, err
 	}
 	if err := os.WriteFile(filepath.Join(staged, "README.md"), []byte(readme(name)), 0o644); err != nil {
+		return 0, err
+	}
+	if err := os.MkdirAll(filepath.Join(staged, ".github", "workflows"), 0o777); err != nil {
+		return 0, err
+	}
+	if err := os.WriteFile(filepath.Join(staged, ".github", "workflows", "release.yml"), []byte(ReleaseWorkflow), 0o644); err != nil {
 		return 0, err
 	}
 

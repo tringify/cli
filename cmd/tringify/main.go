@@ -15,6 +15,7 @@ import (
 
 	"github.com/tringify/cli/internal/mcp"
 	"github.com/tringify/cli/internal/themebinaries"
+	"github.com/tringify/cli/internal/trustedpublishing"
 )
 
 // version is set at build time.
@@ -66,7 +67,7 @@ Apps:
   app block context     Print the sample data each app block receives on a page
   app block preview     Preview the app's blocks inside a theme, as a store renders them
   app install-link      Create a link that installs the app on a store
-  app release           Release the draft as a new version
+  app release           Release the draft as a new version (--bump, or --version X.Y.Z)
   app versions          List the app's versions
   app listing show      Show the app's App Store listing
   app listing update    Change the listing's text, support email, icon and screenshots
@@ -92,6 +93,13 @@ Development stores:
   store list            List your organization's development stores
   store create          Create a development store
 
+Publishing from GitHub Actions (trusted publishing, no stored secret):
+  In a job with "permissions: id-token: write", or with --oidc, these commands
+  exchange the job's ID token for a short-lived publishing token instead of
+  using a login: theme publish, theme docs [status], theme update,
+  app config check|push, app release, app publish, app docs push|status.
+  --listing is optional for the theme commands; questions need --yes.
+
 Other:
   version               Print the CLI version
 
@@ -106,7 +114,7 @@ func main() {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(2)
 		}
-		fmt.Fprintln(os.Stderr, "Error:", friendly(err))
+		fmt.Fprintln(os.Stderr, "Error:", app.friendlyError(err))
 		os.Exit(1)
 	}
 }
@@ -129,6 +137,10 @@ type app struct {
 	portalBase     string // the Developer Portal, where dangerous actions are confirmed
 	resolver       *themebinaries.Resolver
 	uploadHTTP     *http.Client // signed-URL uploads; nil means a 2-minute default
+	command        string       // the command being run, such as "theme publish"
+	oidc           bool         // --oidc: use trusted publishing
+	want           trustedpublishing.Resource
+	publisher      *trustedpublishing.Source // trusted publishing, once used
 }
 
 func newApp(stdout, stderr io.Writer) *app {
@@ -152,6 +164,18 @@ func (a *app) run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		fmt.Fprint(a.stdout, usage)
 		return nil
+	}
+	args, oidc, err := takeOIDCFlag(args)
+	if err != nil {
+		return err
+	}
+	a.oidc = oidc
+	a.command = commandName(args)
+	if len(args) == 0 {
+		return fmt.Errorf("--oidc (trusted publishing) works only with %s", publishingCommandList)
+	}
+	if a.oidc && !publishingCommands[a.command] {
+		return fmt.Errorf("--oidc (trusted publishing) works only with %s, not with `tringify %s`", publishingCommandList, a.command)
 	}
 	switch args[0] {
 	case "login":

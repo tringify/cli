@@ -135,11 +135,18 @@ func (a *app) appSitePush(ctx context.Context, kind string, args []string) error
 			"Save the docs/*.md files as the draft of the app's documentation on its Tringify support site. Each file is one page: its name without .md is the page's address (lowercase letters, numbers and hyphens), and it starts with front matter giving the title and, optionally, the position:\n\n  ---\n  title: Getting started\n  order: 1\n  ---\n\nPages are ordered by order, then by file name; the first is the docs home. Only the .md files directly in the folder are pushed. With --submit the draft is also submitted for review; once approved, it is published as the new version.",
 			"dir", "docs", "folder of markdown pages"
 	}
+	if kind == "docs" {
+		usage = strings.Replace(usage, "[--app ID]", "[--app ID] [--oidc]", 1)
+		summary += " In a GitHub Actions job with `permissions: id-token: write` (or with --oidc) it uses trusted publishing for the app."
+	}
 	fs := newFlags(usage, summary)
 	source := fs.String(sourceFlag, sourceDefault, sourceHelp)
 	submit := fs.Bool("submit", false, "also submit the draft for review")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	config := fs.String("config", appconfig.FileName, "configuration file")
+	if kind == "docs" {
+		oidcFlag(fs)
+	}
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
@@ -147,6 +154,7 @@ func (a *app) appSitePush(ctx context.Context, kind string, args []string) error
 	if err != nil {
 		return err
 	}
+	a.appPublishTarget(appID)
 	site, err := a.fetchSite(ctx, appID)
 	if err != nil {
 		return err
@@ -338,9 +346,17 @@ func (a *app) warnImages(path, markdown string, hosts []string) {
 }
 
 func (a *app) appSiteStatus(ctx context.Context, kind string, args []string) error {
-	fs := newFlags("app "+kind+" status [--app ID]", "Show the draft, the submission in review and the published version of the app's "+siteKindNames[kind]+" on its Tringify support site.")
+	usage, summary := "app "+kind+" status [--app ID]", "Show the draft, the submission in review and the published version of the app's "+siteKindNames[kind]+" on its Tringify support site."
+	if kind == "docs" {
+		usage += " [--oidc]"
+		summary += " In a GitHub Actions job with `permissions: id-token: write` (or with --oidc) it uses trusted publishing for the app."
+	}
+	fs := newFlags(usage, summary)
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	config := fs.String("config", appconfig.FileName, "configuration file")
+	if kind == "docs" {
+		oidcFlag(fs)
+	}
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
@@ -348,6 +364,7 @@ func (a *app) appSiteStatus(ctx context.Context, kind string, args []string) err
 	if err != nil {
 		return err
 	}
+	a.appPublishTarget(appID)
 	site, err := a.fetchSite(ctx, appID)
 	if err != nil {
 		return err

@@ -66,7 +66,7 @@ tringify theme diff --listing LISTING_ID       # what changes compared with the 
 tringify theme publish --listing LISTING_ID --version 1.0.0 --notes "First release"
 ```
 
-Create the listing first, with `tringify theme create` (a free listing) or in the [Developer Portal](https://dev.tringify.com) under **Themes**, and describe it with `tringify theme update`. Publishing a version does not list the theme in the Theme Store: once the listing and a published version are ready, send them for review with `tringify theme submit`. An approved listing appears in the Theme Store.
+Create the listing first, with `tringify theme create` (a free listing) or in the [Developer Portal](https://dev.tringify.com) under **Themes**, and describe it with `tringify theme update`. Publishing a version does not list the theme in the Theme Store: once the listing and a published version are ready, send them for review with `tringify theme submit`. An approved listing appears in the Theme Store. To publish each version from GitHub Actions when you push a tag, with no stored secret, see [Publish from GitHub Actions](#publish-from-github-actions); `theme init` already added the workflow.
 
 ```sh
 tringify theme create --name "Aurora" --slug aurora --support-url https://example.com/help
@@ -103,9 +103,12 @@ A marketplace app then releases versions; a private app releases each version to
 
 ```sh
 tringify app release --bump minor --notes "First release"   # marketplace
+tringify app release --version 1.1.0 --notes "New settings"  # marketplace, naming the version
 tringify app publish 1.0.0                                   # once approved
 tringify app release --notes "New settings page"             # private
 ```
+
+To release from GitHub Actions when you push a tag, see [Publish from GitHub Actions](#publish-from-github-actions).
 
 An app whose scopes can read customer data (`read_customers`, `read_orders`, or a write scope that includes them) needs a webhook URL: `app config push` and `app release` refuse it otherwise (`APP_PRIVACY_WEBHOOK_REQUIRED`). Every app receives the mandatory privacy events at that URL, even while webhooks are switched off: `app.store_redact` (48 hours after a store uninstalls the app, unless it reinstalls first, and at once when the store is deleted) and, for apps that can read customer data, `app.customer_data_request` and `app.customer_redact`. They cannot be unsubscribed; the [app starter](https://github.com/tringify/app-starter) handles all three.
 
@@ -163,6 +166,106 @@ tringify app block preview --theme ../my-theme --page collection
 
 `app config push` and `app release` run the check first and stop if it finds a problem.
 
+## Publish from GitHub Actions
+
+Themes and apps can be published from a GitHub Actions workflow with **trusted publishing**, the way PyPI and npm do it: no token or secret is stored in the repository. You say once, in the Developer Portal, which GitHub workflow may publish a theme listing or app; each run then proves who it is with the OIDC ID token GitHub gives the job, and the CLI exchanges it for a publishing token that lasts 15 minutes, can only publish that one listing or app, and is kept in memory only (never in a keychain or file, never printed).
+
+1. In the [Developer Portal](https://dev.tringify.com), open the theme listing or app, then **Trusted publishing**, and add a publisher: the repository owner and name, the workflow file (`release.yml`), and optionally an environment (`release`). Only tag pushes matching the publisher's ref pattern (default `refs/tags/v*`) can publish.
+2. Add the workflow below to the repository (`tringify theme init` and `tringify app init` write one for you as `.github/workflows/release.yml`).
+3. Release by pushing a tag. The tag's message becomes the release notes:
+
+```sh
+git tag -a v1.2.0 -m "Faster product pages"
+git push origin v1.2.0
+```
+
+Theme repository, `.github/workflows/release.yml`:
+
+```yaml
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - run: curl -fsSL https://raw.githubusercontent.com/tringify/cli/main/install.sh | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: tringify theme check --mode sealed
+      - name: Release notes from the tag message
+        run: |
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+      - run: tringify theme publish --version "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --yes
+      - if: hashFiles('docs/*.md') != ''
+        run: tringify theme docs
+```
+
+App repository (marketplace app), `.github/workflows/release.yml`:
+
+```yaml
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - run: curl -fsSL https://raw.githubusercontent.com/tringify/cli/main/install.sh | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Release notes from the tag message
+        run: |
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+      - run: tringify app config push --yes
+      - run: tringify app release --version "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --yes
+      - if: hashFiles('docs/*.md') != ''
+        run: tringify app docs push --submit
+  # Fails while the version is in review: once Tringify approves it,
+  # re-run this job from the workflow run's page (it gets a fresh ID token).
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: curl -fsSL https://raw.githubusercontent.com/tringify/cli/main/install.sh | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: tringify app publish "$GITHUB_REF_NAME"
+```
+
+For a private app, drop `--version` and the `publish` job: `tringify app release --notes-file "$RUNNER_TEMP/notes.md" --yes` sends the draft to every store that has the app, and Tringify numbers private updates itself.
+
+How it works and what to know:
+
+- Trusted publishing is used when the job has `permissions: id-token: write` (GitHub then sets `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`), or when you pass `--oidc`. Without that permission the CLI stops with: *GitHub Actions did not give this job an ID token. Add `permissions: id-token: write` to the job that runs tringify.* The ID token's audience is always `tringify`.
+- Only the publishing commands work this way: `theme publish`, `theme docs` (and `theme docs status`), `theme update`, `app config check`, `app config push`, `app release`, `app publish`, `app docs push` and `app docs status`. Other commands that need the Developer API stop with an error; commands that need no sign-in, such as `theme check`, work as usual.
+- The theme commands take the listing from the publishing token, so `--listing` is optional. The app commands use `app_id` from `tringify.app.json`, or `--app`. If one workflow is the trusted publisher of several listings or apps, pass `--listing` or `--app` to choose.
+- Questions are never asked: pass `--yes` to `theme publish`, `app config push` and `app release`. Without a terminal, a command that would ask stops and names `--yes` instead of waiting.
+- `--version` accepts a tag name such as `v1.2.0`. `app release --version X.Y.Z` releases exactly that version; it must be the next patch, minor or major version after the newest one (the first version is always 1.0.0).
+- `--notes-file FILE` (or `-` for standard input) reads release notes from a file, such as the annotated tag's message written by `git tag -l --format='%(contents)'`. Write it outside the checkout (`$RUNNER_TEMP`): `theme publish` refuses a work tree with untracked files.
+- The run must be started by pushing a tag, from the workflow file named on the publisher; the tringify steps must be in that file, not in a reusable workflow it calls. Pull requests and other events cannot publish. When no publisher matches, the error shows the repository, repository ID, workflow, ref and environment GitHub reported, so you can compare them with the publisher.
+- A publishing token has no more access than the organization member who added the trusted publisher has now. If that member leaves or loses the permission, the publisher stops working until someone adds it again. Every change made with a publishing token is in the organization's activity log as "Trusted publisher github.com/OWNER/REPO (WORKFLOW)".
+- `theme publish --install-store` is not available with trusted publishing.
+
 ## Commands
 
 | Command | What it does |
@@ -171,7 +274,7 @@ tringify app block preview --theme ../my-theme --page collection
 | `login --store` | Signs in to a store. `theme push`, `theme dev` and `theme pull` do this for you when needed. |
 | `logout` | Signs out of the developer organization and revokes the CLI's access. `--store ID` signs out of one store; `--all` signs out everywhere. |
 | `whoami` | Shows the organization and stores you are signed in to and the access each login has. |
-| `theme init [DIR] [--name NAME] [--from SOURCE]` | Creates a theme from [Canvas](https://github.com/tringify/canvas), Tringify's default theme, or from a local theme directory with `--from`, then builds and validates it. The new theme gets its own name (`--name`, default: from `DIR`), version 1.0.0, draft status and a new README; the source's README, changelog, CI workflows, scripts and git history are not copied. `DIR` must not exist; nothing is created if validation fails. |
+| `theme init [DIR] [--name NAME] [--from SOURCE]` | Creates a theme from [Canvas](https://github.com/tringify/canvas), Tringify's default theme, or from a local theme directory with `--from`, then builds and validates it. The new theme gets its own name (`--name`, default: from `DIR`), version 1.0.0, draft status, a new README and a release workflow (`.github/workflows/release.yml`, see [Publish from GitHub Actions](#publish-from-github-actions)); the source's README, changelog, CI workflows, scripts and git history are not copied. `DIR` must not exist; nothing is created if validation fails. |
 | `theme preview [DIR] [--port 9292] [--preset NAME] [--host ADDRESS]` | Serves a local preview with sample content at `127.0.0.1:9292` and rebuilds when you edit sources. A failed edit shows the error and keeps the last good page. |
 | `theme build [DIR]` | Compiles `src/sections/<name>/` into `sections/<name>.vasc` and updates the section list in `theme.json`. |
 | `theme check [DIR] [--mode sealed\|development]` | Validates the compiled theme, as it is, with the same rules used on upload. Run `theme build` first after editing `src/`. Sealed mode, the default, also needs a non-empty template for every page, including the Gift Card page (`templates/gift_card.json`); `--mode development` leaves that out while you build one page at a time. |
@@ -190,29 +293,29 @@ tringify app block preview --theme ../my-theme --page collection
 | `theme listings` | Lists your organization's theme listings and their IDs. |
 | `theme create --name NAME --slug SLUG [--support-url URL] [--terms-url URL]` | Creates a free theme listing in your organization and prints its ID. `--slug` is its URL name: lowercase letters, numbers and hyphens. |
 | `theme categories` | Lists the Theme Store categories, for `theme update --category`. |
-| `theme docs --listing ID [DIR]` | Publishes the theme's documentation on `themes-support.tringify.com/<slug>/docs` from the `.md` files in DIR (default `./docs`), in the same format as `app docs push`: one file per page, the file name is the page address, front matter gives `title` and `order`. Saves the draft and submits it; Tringify reviews it before it goes live. `--draft` only saves the draft; `theme docs status --listing ID` shows what is published, submitted and drafted. |
-| `theme update --listing ID [--name N] [--tagline T] [--description D \| --description-file FILE] [--category SLUG] [--support-url URL] [--terms-url URL] [--screenshot FILE]... [--hero FILE] [--style-hero STYLE=FILE]... [--style-cover STYLE=FILE]...` | Changes a listing's text, category, links, screenshots and style covers; only the parts you pass change. Screenshots and covers are 1280×720 PNG, JPEG or WebP. Passing `--screenshot` replaces all screenshots, in the order given; passing `--style-cover` replaces all covers, where `STYLE` is the style preset name. |
+| `theme docs --listing ID [--draft] [--oidc] [DIR]` | Publishes the theme's documentation on `themes-support.tringify.com/<slug>/docs` from the `.md` files in DIR (default `./docs`), in the same format as `app docs push`: one file per page, the file name is the page address, front matter gives `title` and `order`. Saves the draft and submits it; Tringify reviews it before it goes live. `--draft` only saves the draft; `theme docs status --listing ID` shows what is published, submitted and drafted. With trusted publishing (`--oidc`) `--listing` is optional. |
+| `theme update --listing ID [--oidc] [--name N] [--tagline T] [--description D \| --description-file FILE] [--category SLUG] [--support-url URL] [--terms-url URL] [--screenshot FILE]... [--hero FILE] [--style-hero STYLE=FILE]... [--style-cover STYLE=FILE]...` | Changes a listing's text, category, links, screenshots and style covers; only the parts you pass change. Screenshots and covers are 1280×720 PNG, JPEG or WebP. Passing `--screenshot` replaces all screenshots, in the order given; passing `--style-cover` replaces all covers, where `STYLE` is the style preset name. With trusted publishing (`--oidc`) `--listing` is optional. |
 | `theme submit --listing ID` | Submits the listing for Theme Store review. |
-| `theme publish --listing ID --version X.Y.Z [--notes TEXT] [--breaking] [--install-store ID] [--yes] [DIR]` | Packages the theme, shows what changes compared with the newest published version, and publishes it as a new version of the listing once you confirm. Pass `--yes` to skip the question. |
+| `theme publish --listing ID --version X.Y.Z [--notes TEXT \| --notes-file FILE] [--breaking] [--install-store ID] [--yes] [--oidc] [DIR]` | Packages the theme, shows what changes compared with the newest published version, and publishes it as a new version of the listing once you confirm. Pass `--yes` to skip the question (needed without a terminal and with trusted publishing). `--version` accepts a tag name such as `v1.2.0`. `--notes-file` reads the release notes from a file (`-` for standard input). With trusted publishing (`--oidc`) `--listing` is optional and `--install-store` is not available. |
 | `app list` | Lists your organization's apps and their IDs. |
 | `app create --name NAME [--handle HANDLE] --type standard\|sales_channel --distribution private\|marketplace [--category ID --subcategory ID] [--description TEXT] [--json]` | Creates an app and prints its app ID, handle, client ID and client secret. The handle is made from the name unless you choose it with `--handle`; it is checked before the app is created and cannot change later. The secret is shown only in this output; to issue a new one, run `app secret rotate`. Sales channel apps need a category and subcategory, which set the channel type. With `--json` the result is JSON, for scripts and piping into a secret store. |
 | `app categories [--type standard\|sales_channel] [--json]` | Lists the category and subcategory IDs to pass to `app create`. Needs no sign-in. |
-| `app init --app ID [DIR]` | Creates a project from [app-starter](https://github.com/tringify/app-starter) in a new directory (default: the app's handle), writes the app's configuration to `tringify.app.json` and its block sources to `blocks/`, adds an example template block (`blocks/instalments.vasc`: the price split into payments, with the number of payments as a merchant setting), sets the app and client IDs, and creates `.dev.vars` for local development. Add the client secret from `app create` and the signing secret from `app webhook rotate-key` to it. |
+| `app init --app ID [DIR]` | Creates a project from [app-starter](https://github.com/tringify/app-starter) in a new directory (default: the app's handle), writes the app's configuration to `tringify.app.json` and its block sources to `blocks/`, adds an example template block (`blocks/instalments.vasc`: the price split into payments, with the number of payments as a merchant setting), sets the app and client IDs, adds a release workflow (`.github/workflows/release.yml`, see [Publish from GitHub Actions](#publish-from-github-actions)), and creates `.dev.vars` for local development. Add the client secret from `app create` and the signing secret from `app webhook rotate-key` to it. |
 | `app config pull [--app ID] [--file PATH] [--yes]` | Writes the app's draft configuration to `tringify.app.json` and each block's source to `blocks/<key>.vasc`. If the files exist and differ, shows the differences and asks first. Lists `.vasc` files in `blocks/` that no block uses any more, and leaves them in place. |
-| `app config check [--file PATH]` | Checks the app blocks, then has the Developer API check the file and the block sources it names exactly as a push would, without changing the draft. Prints each problem with the field it concerns, such as `server_events.attribution.cookies`. |
-| `app config push [--file PATH] [--yes]` | Runs `app config check` and pushes nothing if it finds a problem, then shows the fields that differ from the draft and, once you confirm, replaces the draft with the file and the block sources it names. Unknown fields are refused. The saved values are written back to the files when the platform normalizes them, for example sorting scopes. |
+| `app config check [--file PATH] [--oidc]` | Checks the app blocks, then has the Developer API check the file and the block sources it names exactly as a push would, without changing the draft. Prints each problem with the field it concerns, such as `server_events.attribution.cookies`. |
+| `app config push [--file PATH] [--yes] [--oidc]` | Runs `app config check` and pushes nothing if it finds a problem, then shows the fields that differ from the draft and, once you confirm (`--yes` skips the question), replaces the draft with the file and the block sources it names. Unknown fields are refused. The saved values are written back to the files when the platform normalizes them, for example sorting scopes. |
 | `app block check [--file PATH]` | Checks the app's blocks with the rules the platform applies when the configuration is pushed, and prints each problem as `FILE:LINE: message`. |
 | `app block context [--page PAGE] [--theme DIR] [--entity HANDLE]` | Prints the sample data each block that lists the page receives: the page's data cut to the block's `ctx_needs`. Uses the built-in sample catalog, or a theme's demo content with `--theme`. |
 | `app block preview [--theme DIR] [--page PAGE] [--after TYPE] [--port 9292]` | Serves a local preview of the theme (default: [Canvas](https://github.com/tringify/canvas), the default theme, downloaded as `theme init` does) with the app's blocks that list the page in its app block slot, after the theme block of type `--after` (default `price`). Blocks render as on a store: their mode's data only, the app markup policy, the page's app block budget and the `tf-ab-*` styles. Rebuilds when `tringify.app.json`, a block source or the theme changes. |
 | `app install-link [--store DOMAIN] [--draft] [--expires CHOICE] [--uses N]` | Prints a link that installs the app on a store. A private app installs its current draft; a marketplace app installs its published version, or with `--draft` its draft (development and transfer stores of your organization only). The expiry choices and the defaults for both flags come from the Developer API, the same as in the Developer Portal; an unknown `--expires` lists the choices. |
-| `app release [--bump patch\|minor\|major] [--notes TEXT] [--yes]` | Releases the draft. A marketplace app submits it as a new version (`--bump`): the listing needs an icon, at least one screenshot, a support email, and the app needs a published privacy policy and terms of service (`app listing show` lists what is missing); the submit also sends a signed `app.test` to the webhook URL and needs a 2xx answer; and a version identical to the published one is refused, since a version is only for configuration or listing changes (code changes go live when you deploy your own server). A private app releases it to every installed store that does not have it yet, after asking (`--yes` skips the question); the output says how many stores got it and whether any could not be updated. Refuses while `tringify.app.json` or a block source differs from the draft, or the draft's blocks fail `app block check`. |
+| `app release [--bump patch\|minor\|major \| --version X.Y.Z] [--notes TEXT \| --notes-file FILE] [--yes] [--oidc]` | Releases the draft. A marketplace app submits it as a new version (`--bump`), or as exactly the version named in `--version` (a tag name such as `v1.2.0` works), which must be the next patch, minor or major version after the newest one: the listing needs an icon, at least one screenshot, a support email, and the app needs a published privacy policy and terms of service (`app listing show` lists what is missing); the submit also sends a signed `app.test` to the webhook URL and needs a 2xx answer; and a version identical to the published one is refused, since a version is only for configuration or listing changes (code changes go live when you deploy your own server). A private app releases it to every installed store that does not have it yet, after asking (`--yes` skips the question); the output says how many stores got it and whether any could not be updated. Refuses while `tringify.app.json` or a block source differs from the draft, or the draft's blocks fail `app block check`. |
 | `app versions` | Lists the app's versions and their review status, or for a private app, the updates sent with their release notes and how many stores accepted each, have it waiting, or got a later version instead. |
-| `app publish VERSION` | Publishes an approved version so stores can install it or update to it. |
+| `app publish VERSION [--oidc]` | Publishes an approved version so stores can install it or update to it. `VERSION` may be a tag name such as `v1.2.0`. |
 | `app listing show [--app ID]` | Shows the app's App Store listing and lists what it still needs before a marketplace submit, in the platform's words, with the command that fixes each (for example `app privacy push --submit`). |
 | `app listing update [--app ID] [--name NAME] [--icon FILE] [--screenshot FILE]... [--tagline T] [--short-description D] [--description D \| --description-file FILE] [--support-email EMAIL] [--category ID --subcategory ID]` | Changes the listing; only the parts you pass change. `--name` renames the app. The icon is a 512×512 PNG, JPEG or WebP; passing `--screenshot` replaces all screenshots, in the order given. The change reaches the App Store with the next `app release` and `app publish`. |
 | `app privacy push [--file privacy.md] [--submit]` | Saves the markdown file as the draft of the app's privacy policy on its Tringify support site. With `--submit` it is also submitted for review; once approved it is published as a new version and stores that installed the app are notified. |
 | `app terms push [--file terms.md] [--submit]` | The same for the app's terms of service. |
-| `app docs push [--dir docs] [--submit]` | Saves every `.md` file directly in the folder as one page of the app's documentation, ordered by the `order` in its front matter, then by file name. |
+| `app docs push [--dir docs] [--submit] [--oidc]` | Saves every `.md` file directly in the folder as one page of the app's documentation, ordered by the `order` in its front matter, then by file name. `app docs push` and `app docs status` also work with trusted publishing. |
 | `app api push [--dir api] [--submit]` | The same for the app's API reference, served at `/api`. |
 | `app privacy status`, `app terms status`, `app docs status`, `app api status` | Shows the public URL, the published version with its date, URL and whether the support site has it yet, the submission in review, the draft, and the last review decision with its note. |
 | `app webhook test` | Sends a signed `app.test` webhook to the app's webhook URL and reports what your endpoint answered. |
@@ -246,7 +349,7 @@ Edit sections in `src/sections/<name>/` as `body.html`, `style.css` and `schema.
 
 The CLI never receives more access than your own role in that organization or store, and if your role changes, the CLI's access changes with it. Each app action needs the matching permission in your organization: editing needs Edit Apps, releasing needs Release Apps, rotating a secret needs Rotate App Credentials, and `app retire` and `app delete` need Delete Apps. It cannot change your live theme, delete stores, retire or delete apps (you confirm those in the Developer Portal), create paid listings, change pricing, or read an app's existing client secret. If an `app` or `store` command is refused for missing access although your role allows it, run `tringify login` again to grant the CLI that access.
 
-Sign-in uses OAuth with PKCE and a one-time listener on `127.0.0.1`, so your password never passes through the CLI. Access tokens last 15 minutes and are refreshed automatically; refresh tokens rotate on every use. Tokens are kept only in your system keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux (GNOME Keyring, KWallet). Without one, sign-in stops and says so. Sign-in needs a browser and a keychain, so the CLI is for your own computer; there is no token sign-in for CI. Which store or organization each login belongs to (never the tokens) is kept in `~/.config/tringify` or your system's equivalent; set `TRINGIFY_CONFIG_DIR` to use another directory. If the keychain does not answer (for example a locked Secret Service over SSH, where it cannot show its unlock prompt), the CLI says it is waiting and stops after two minutes.
+Sign-in uses OAuth with PKCE and a one-time listener on `127.0.0.1`, so your password never passes through the CLI. Access tokens last 15 minutes and are refreshed automatically; refresh tokens rotate on every use. Tokens are kept only in your system keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux (GNOME Keyring, KWallet). Without one, sign-in stops and says so. Sign-in needs a browser and a keychain, so it is for your own computer. In CI, publish with [trusted publishing from GitHub Actions](#publish-from-github-actions) instead: no login, token or secret is stored. Which store or organization each login belongs to (never the tokens) is kept in `~/.config/tringify` or your system's equivalent; set `TRINGIFY_CONFIG_DIR` to use another directory. If the keychain does not answer (for example a locked Secret Service over SSH, where it cannot show its unlock prompt), the CLI says it is waiting and stops after two minutes.
 
 You can see and disconnect the CLI's access at any time in your Tringify account under **Connected tools**, or run `tringify logout`.
 

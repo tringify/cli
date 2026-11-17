@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 )
 
@@ -33,21 +34,23 @@ func (a *app) themeDocs(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "push" {
 		args = args[1:]
 	}
-	fs := newFlags("theme docs [push] --listing ID [--draft] [DIR] | theme docs status --listing ID", "Publish the theme's documentation on themes-support.tringify.com/<slug>/docs from the .md files in DIR (default ./docs), the same format as `tringify app docs push`: one file per page, the file name (without .md) is the page address, and each file starts with front matter (---, title: ..., order: N, ---). The pages are saved as the draft and submitted; Tringify reviews them before they go live. --draft only saves the draft.")
-	listing := fs.String("listing", "", "theme listing ID (see `tringify theme listings`)")
+	fs := newFlags("theme docs [push] --listing ID [--draft] [--oidc] [DIR] | theme docs status --listing ID [--oidc]", "Publish the theme's documentation on themes-support.tringify.com/<slug>/docs from the .md files in DIR (default ./docs), the same format as `tringify app docs push`: one file per page, the file name (without .md) is the page address, and each file starts with front matter (---, title: ..., order: N, ---). The pages are saved as the draft and submitted; Tringify reviews them before they go live. --draft only saves the draft. In a GitHub Actions job with `permissions: id-token: write` (or with --oidc) it uses trusted publishing, and --listing is optional.")
+	listing := fs.String("listing", "", "theme listing ID (see `tringify theme listings`); optional with trusted publishing")
 	draftOnly := fs.Bool("draft", false, "save the draft without submitting it")
+	oidcFlag(fs)
 	rest, err := parse(fs, args)
 	if err != nil {
 		return err
-	}
-	if *listing == "" {
-		return errors.New("--listing is required")
 	}
 	dir := "docs"
 	if len(rest) > 0 {
 		dir = rest[0]
 	}
-	base := "/org/themes/" + *listing + "/docs"
+	listingID, err := a.themeListing(ctx, *listing)
+	if err != nil {
+		return err
+	}
+	base := "/org/themes/" + url.PathEscape(listingID) + "/docs"
 	var site themeSite
 	if err := a.mustDevAPIDo(ctx, http.MethodGet, base, nil, &site); err != nil {
 		return err
@@ -83,16 +86,18 @@ func (a *app) themeDocs(ctx context.Context, args []string) error {
 }
 
 func (a *app) themeDocsStatus(ctx context.Context, args []string) error {
-	fs := newFlags("theme docs status --listing ID", "Show the theme documentation's published version, submission and draft.")
-	listing := fs.String("listing", "", "theme listing ID")
+	fs := newFlags("theme docs status --listing ID [--oidc]", "Show the theme documentation's published version, submission and draft. With trusted publishing (--oidc, or a GitHub Actions job with `permissions: id-token: write`) --listing is optional.")
+	listing := fs.String("listing", "", "theme listing ID; optional with trusted publishing")
+	oidcFlag(fs)
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
-	if *listing == "" {
-		return errors.New("--listing is required")
+	listingID, err := a.themeListing(ctx, *listing)
+	if err != nil {
+		return err
 	}
 	var site themeSite
-	if err := a.mustDevAPIDo(ctx, http.MethodGet, "/org/themes/"+*listing+"/docs", nil, &site); err != nil {
+	if err := a.mustDevAPIDo(ctx, http.MethodGet, "/org/themes/"+url.PathEscape(listingID)+"/docs", nil, &site); err != nil {
 		return err
 	}
 	a.printf("Documentation of %s: %s\n", site.ListingSlug, site.PublicURL)
@@ -113,7 +118,7 @@ func (a *app) themeDocsStatus(ctx context.Context, args []string) error {
 	show("Submitted", site.Submitted)
 	show("Draft", site.Draft)
 	if site.Published == nil && site.Submitted == nil && site.Draft == nil {
-		a.println("  Nothing yet. Write the pages in ./docs and run `tringify theme docs --listing " + *listing + "`.")
+		a.println("  Nothing yet. Write the pages in ./docs and run `tringify theme docs --listing " + listingID + "`.")
 	}
 	if site.LastDecision != nil && site.LastDecision.Action == "reject" {
 		a.println("  Changes requested: " + site.LastDecision.Note)

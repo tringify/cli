@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tringify/cli/internal/appconfig"
 	"github.com/tringify/cli/internal/devapi"
+	"github.com/tringify/cli/internal/trustedpublishing"
 )
 
 type appVersion struct {
@@ -44,20 +46,35 @@ func (a *app) appDistribution(ctx context.Context, api *devapi.Client, appID str
 }
 
 func (a *app) appRelease(ctx context.Context, args []string) error {
-	fs := newFlags("app release [--bump patch|minor|major] [--notes TEXT]", "Release the app's draft. Checks the draft's app blocks first (see `tringify app block check`) and releases nothing if they have problems. A marketplace app submits it as a new version: the previous version number with the part you name in --bump increased, where major marks the version as breaking. A private app releases it as a new version to every store that has the app. Stores move to a new version by themselves; one that asks for more access waits until the store approves it.")
+	fs := newFlags("app release [--bump patch|minor|major | --version X.Y.Z] [--notes TEXT | --notes-file FILE] [--yes] [--oidc]", "Release the app's draft. Checks the draft's app blocks first (see `tringify app block check`) and releases nothing if they have problems. A marketplace app submits it as a new version: the previous version number with the part you name in --bump increased, where major marks the version as breaking; or exactly the version you name in --version (v1.2.0 from a tag works too), which must be the next patch, minor or major version after the newest one. A private app releases it as a new version to every store that has the app, after asking (--yes releases without asking; needed when not in a terminal and with trusted publishing); Tringify numbers private updates, so --bump and --version are for marketplace apps. Stores move to a new version by themselves; one that asks for more access waits until the store approves it. In a GitHub Actions job with `permissions: id-token: write` (or with --oidc) it uses trusted publishing for the app.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	bump := fs.String("bump", "", "marketplace apps: patch, minor or major")
+	versionFlag := fs.String("version", "", "marketplace apps: release exactly this version, for example 1.2.0 or v1.2.0 (instead of --bump)")
 	notes := fs.String("notes", "", "release notes shown to stores")
-	yes := fs.Bool("yes", false, "private apps: release without asking")
+	notesFile := fs.String("notes-file", "", "read the release notes from this file (- for standard input), for example an annotated tag's message")
+	yes := fs.Bool("yes", false, "release without asking (needed when not in a terminal and with trusted publishing)")
 	renderer := fs.String("renderer", "", rendererHelp)
+	oidcFlag(fs)
 	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	target := trimV(*versionFlag)
+	if target != "" && *bump != "" {
+		return errors.New("pass --bump or --version, not both")
+	}
+	if target != "" && !appVersionPattern.MatchString(target) {
+		return fmt.Errorf("%q is not a version like 1.2.0", *versionFlag)
+	}
+	releaseNotes, err := a.readNotes(*notes, *notesFile)
+	if err != nil {
 		return err
 	}
 	appID, err := appTarget(*appFlag, *file)
 	if err != nil {
 		return err
 	}
+	a.appPublishTarget(appID)
 	api, _, err := a.devAPI()
 	if err != nil {
 		return err
@@ -85,15 +102,28 @@ func (a *app) appRelease(ctx context.Context, args []string) error {
 		return err
 	}
 	if distribution == "private" {
-		if *bump != "" {
-			return errors.New("--bump is for marketplace apps; private updates are numbered for you")
+		if *bump != "" || target != "" {
+			return errors.New("--bump and --version are for marketplace apps; Tringify numbers private updates for you. Leave them out")
 		}
-		return a.sendPrivateUpdate(ctx, api, appID, *notes, *yes)
+		return a.sendPrivateUpdate(ctx, api, appID, releaseNotes, *yes)
+	}
+	if target != "" {
+		latest := ""
+		versions, err := a.listAppVersions(ctx, api, appID, 1)
+		if err != nil {
+			return err
+		}
+		if len(versions) > 0 {
+			latest = versions[0].Version
+		}
+		if *bump, err = bumpTo(latest, target); err != nil {
+			return err
+		}
 	}
 	if *bump != "patch" && *bump != "minor" && *bump != "major" {
-		return errors.New("--bump must be patch, minor or major")
+		return errors.New("--bump must be patch, minor or major (or name the version with --version)")
 	}
-	body := map[string]string{"bump": *bump, "release_notes": *notes}
+	body := map[string]string{"bump": *bump, "release_notes": releaseNotes}
 	if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/submit", body, nil); err != nil {
 		return appAccess(err)
 	}
@@ -103,6 +133,9 @@ func (a *app) appRelease(ctx context.Context, args []string) error {
 		return err
 	}
 	v := versions[0]
+	if target != "" && v.Version != target {
+		return fmt.Errorf("submitted the draft as version %s, not %s: another version was submitted at the same time. See `tringify app versions`", v.Version, target)
+	}
 	switch v.Status {
 	case "approved":
 		a.printf("Version %s is approved. Publish it with `tringify app publish %s`.\n", v.Version, v.Version)
@@ -110,6 +143,52 @@ func (a *app) appRelease(ctx context.Context, args []string) error {
 		a.printf("Submitted version %s for review (%s). After approval, publish it with `tringify app publish %s`.\n", v.Version, v.Status, v.Version)
 	}
 	return nil
+}
+
+var appVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+
+// bumpTo works out the --bump that makes target the next version after
+// latest, the newest submitted version ("" when there is none, and the first
+// version is always 1.0.0).
+func bumpTo(latest, target string) (string, error) {
+	if latest == "" {
+		if target != "1.0.0" {
+			return "", fmt.Errorf("the app has no versions yet, and its first version is always 1.0.0, not %s", target)
+		}
+		return "minor", nil
+	}
+	parse := func(v string) ([3]int, bool) {
+		var n [3]int
+		m := appVersionPattern.FindStringSubmatch(v)
+		if m == nil {
+			return n, false
+		}
+		for i := range n {
+			n[i], _ = strconv.Atoi(m[i+1])
+		}
+		return n, true
+	}
+	from, ok := parse(latest)
+	if !ok {
+		return "", fmt.Errorf("the newest version, %s, is not a version like 1.2.0; use --bump", latest)
+	}
+	to, _ := parse(target)
+	patch := fmt.Sprintf("%d.%d.%d", from[0], from[1], from[2]+1)
+	minor := fmt.Sprintf("%d.%d.0", from[0], from[1]+1)
+	major := fmt.Sprintf("%d.0.0", from[0]+1)
+	switch target {
+	case patch:
+		return "patch", nil
+	case minor:
+		return "minor", nil
+	case major:
+		return "major", nil
+	}
+	greater := to[0] > from[0] || (to[0] == from[0] && (to[1] > from[1] || (to[1] == from[1] && to[2] > from[2])))
+	if !greater {
+		return "", fmt.Errorf("version %s is not greater than the newest version, %s. Release %s, %s or %s", target, latest, patch, minor, major)
+	}
+	return "", fmt.Errorf("version %s skips versions: after %s the next version is %s (patch), %s (minor) or %s (major)", target, latest, patch, minor, major)
 }
 
 // unavailable is the API's unavailable_regions list: stores an answer is
@@ -266,9 +345,10 @@ func (a *app) appVersions(ctx context.Context, args []string) error {
 }
 
 func (a *app) appPublish(ctx context.Context, args []string) error {
-	fs := newFlags("app publish VERSION", "Publish an approved version so stores can install or update to it.")
+	fs := newFlags("app publish VERSION [--oidc]", "Publish an approved version so stores can install or update to it. VERSION may have a leading v (v1.2.0, a tag name). In a GitHub Actions job with `permissions: id-token: write` (or with --oidc) it uses trusted publishing for the app.")
 	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
 	file := fs.String("file", appconfig.FileName, "configuration file")
+	oidcFlag(fs)
 	positional, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -276,10 +356,12 @@ func (a *app) appPublish(ctx context.Context, args []string) error {
 	if len(positional) != 1 {
 		return errors.New("name the version to publish, for example `tringify app publish 1.2.0`")
 	}
+	want := trimV(positional[0])
 	appID, err := appTarget(*appFlag, *file)
 	if err != nil {
 		return err
 	}
+	a.appPublishTarget(appID)
 	api, _, err := a.devAPI()
 	if err != nil {
 		return err
@@ -289,10 +371,13 @@ func (a *app) appPublish(ctx context.Context, args []string) error {
 		return err
 	}
 	for _, v := range versions {
-		if v.Version != positional[0] {
+		if v.Version != want {
 			continue
 		}
 		if v.Status != "approved" {
+			if trustedpublishing.InGitHubActions() && v.Status == "submitted" {
+				return fmt.Errorf("version %s is %s; only an approved version can be published. Once Tringify approves it, re-run this job (a re-run gets a fresh ID token for the same tag) or run `tringify app publish %s`", v.Version, v.Status, v.Version)
+			}
 			return fmt.Errorf("version %s is %s; only an approved version can be published", v.Version, v.Status)
 		}
 		if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/versions/"+url.PathEscape(v.ID)+"/publish", nil, nil); err != nil {
@@ -301,7 +386,7 @@ func (a *app) appPublish(ctx context.Context, args []string) error {
 		a.printf("Published version %s.\n", v.Version)
 		return nil
 	}
-	return fmt.Errorf("the app has no version %s. See `tringify app versions`", positional[0])
+	return fmt.Errorf("the app has no version %s. See `tringify app versions`", want)
 }
 
 // installLinkChoices are the install link form's choices and defaults, from

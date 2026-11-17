@@ -71,8 +71,8 @@ func (a *app) themeCategories(ctx context.Context, args []string) error {
 }
 
 func (a *app) themeUpdate(ctx context.Context, args []string) error {
-	fs := newFlags("theme update --listing ID [--tagline T] [--description D] [--category SLUG] [--screenshot FILE]... [--style-cover STYLE=FILE]... [--hero FILE] [--style-hero STYLE=FILE]...", "Change a listing's text, category, links, screenshots, style covers and hero images. Only the parts you pass change. Screenshots and covers are 1280×720 PNG, JPEG or WebP; passing --screenshot replaces all screenshots, in the order given, and passing --style-cover replaces all covers. Hero images are the tall pictures the Theme Store hero shows for a featured theme: 1200×1500 (4:5); --hero sets the theme's own, --style-hero one style's (the style needs a cover).")
-	listing := fs.String("listing", "", "theme listing ID (see `tringify theme listings`)")
+	fs := newFlags("theme update --listing ID [--oidc] [--tagline T] [--description D] [--category SLUG] [--screenshot FILE]... [--style-cover STYLE=FILE]... [--hero FILE] [--style-hero STYLE=FILE]...", "Change a listing's text, category, links, screenshots, style covers and hero images. Only the parts you pass change. Screenshots and covers are 1280×720 PNG, JPEG or WebP; passing --screenshot replaces all screenshots, in the order given, and passing --style-cover replaces all covers. Hero images are the tall pictures the Theme Store hero shows for a featured theme: 1200×1500 (4:5); --hero sets the theme's own, --style-hero one style's (the style needs a cover). In a GitHub Actions job with `permissions: id-token: write` (or with --oidc) it uses trusted publishing, and --listing is optional.")
+	listing := fs.String("listing", "", "theme listing ID (see `tringify theme listings`); optional with trusted publishing")
 	name := fs.String("name", "", "new listing name")
 	tagline := fs.String("tagline", "", "one-line tagline")
 	description := fs.String("description", "", "listing description")
@@ -85,11 +85,9 @@ func (a *app) themeUpdate(ctx context.Context, args []string) error {
 	fs.Var(&styleHeroes, "style-hero", "a style's hero image as STYLE=FILE; repeat for each style")
 	fs.Var(&screenshots, "screenshot", "screenshot image; repeat for each, in display order")
 	fs.Var(&covers, "style-cover", "a style's cover as STYLE=FILE, where STYLE is the preset name; repeat for each style")
+	oidcFlag(fs)
 	if _, err := parse(fs, args); err != nil {
 		return err
-	}
-	if *listing == "" {
-		return errors.New("--listing is required")
 	}
 	if *descriptionFile != "" {
 		raw, err := os.ReadFile(*descriptionFile)
@@ -133,12 +131,16 @@ func (a *app) themeUpdate(ctx context.Context, args []string) error {
 			return err
 		}
 	}
+	listingID, err := a.themeListing(ctx, *listing)
+	if err != nil {
+		return err
+	}
 	api, _, err := a.devAPI()
 	if err != nil {
 		return err
 	}
 	var current map[string]any
-	if err := api.Do(ctx, http.MethodGet, "/org/themes/"+url.PathEscape(*listing), nil, &current); err != nil {
+	if err := api.Do(ctx, http.MethodGet, "/org/themes/"+url.PathEscape(listingID), nil, &current); err != nil {
 		return err
 	}
 	// The listing update replaces every field it is sent and clears the ones it
@@ -256,10 +258,10 @@ func (a *app) themeUpdate(ctx context.Context, args []string) error {
 	if !changed {
 		return errors.New("nothing to change: pass at least one of the flags")
 	}
-	if err := api.Do(ctx, http.MethodPut, "/org/themes/"+url.PathEscape(*listing), body, nil); err != nil {
+	if err := api.Do(ctx, http.MethodPut, "/org/themes/"+url.PathEscape(listingID), body, nil); err != nil {
 		return err
 	}
-	a.printf("Updated listing %s.\n", *listing)
+	a.printf("Updated listing %s.\n", listingID)
 	return nil
 }
 
