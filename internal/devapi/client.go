@@ -44,6 +44,9 @@ type Error struct {
 	// Field is the request field a validation failure concerns, as a path
 	// (server_events.attribution.cookies), when the API names one.
 	Field string
+	// ProfileURL is the Developer Portal page that completes the developer
+	// profile, sent with DEVELOPER_PROFILE_APPROVAL_REQUIRED.
+	ProfileURL string
 }
 
 func (e *Error) Error() string {
@@ -58,7 +61,10 @@ func (e *Error) Error() string {
 		message = e.Field + ": " + message
 	}
 	if e.Code != "" {
-		return message + " (" + e.Code + ")"
+		message += " (" + e.Code + ")"
+	}
+	if e.ProfileURL != "" {
+		message += "\nComplete your developer profile: " + e.ProfileURL
 	}
 	return message
 }
@@ -176,6 +182,7 @@ func apiError(status int, raw []byte) *Error {
 		e.Detail = d
 	case map[string]any:
 		e.Field, _ = d["field"].(string)
+		e.ProfileURL, _ = d["profile_url"].(string)
 	}
 	// A reply that is not the API's error format (from a proxy, say) is shown
 	// as the start of its text, so the failure can still be reported.
