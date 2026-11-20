@@ -71,6 +71,12 @@ func (e *Error) Error() string {
 
 // Do sends a request and decodes the "data" field of a successful reply.
 func (c *Client) Do(ctx context.Context, method, path string, body any, out any) error {
+	return c.DoWithHeaders(ctx, method, path, body, nil, out)
+}
+
+// DoWithHeaders is Do with extra request headers (for example a proof-of-work
+// X-Challenge-Token).
+func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body any, headers map[string]string, out any) error {
 	var payload []byte
 	if body != nil {
 		var err error
@@ -78,7 +84,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, out any)
 			return err
 		}
 	}
-	return c.send(ctx, method, path, payload, "application/json", func(resp *http.Response) error {
+	return c.send(ctx, method, path, payload, "application/json", headers, func(resp *http.Response) error {
 		raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 		if err != nil || len(raw) == 0 {
 			return err
@@ -102,7 +108,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, out any)
 
 // send makes the request with a fresh access token, retrying once with a
 // refreshed token on 401, and hands a successful (2xx) response to read.
-func (c *Client) send(ctx context.Context, method, path string, payload []byte, accept string, read func(*http.Response) error) error {
+func (c *Client) send(ctx context.Context, method, path string, payload []byte, accept string, headers map[string]string, read func(*http.Response) error) error {
 	for attempt := 0; attempt < 2; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, c.Base+"/api/v1"+path, bytes.NewReader(payload))
 		if err != nil {
@@ -128,6 +134,9 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte, 
 			req.Header.Set("X-Organization-ID", org)
 		}
 		req.Header.Set("Accept", accept)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
 		req.Header.Set("User-Agent", "tringify-cli/"+c.Version)
 		if payload != nil {
 			req.Header.Set("Content-Type", "application/json")

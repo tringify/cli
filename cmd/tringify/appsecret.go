@@ -26,6 +26,7 @@ func (a *app) appSecretRotate(ctx context.Context, args []string) error {
 	file := fs.String("file", appconfig.FileName, "configuration file")
 	asJSON := fs.Bool("json", false, "print the result as JSON, for scripts and piping into a secret store")
 	pipeTo := fs.String("pipe-to", "", "command that stores the new secret, given on its standard input; the secret is not printed")
+	code := fs.String("code", "", "verification code from your authenticator app (asked for when omitted)")
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
@@ -40,16 +41,20 @@ func (a *app) appSecretRotate(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	return a.rotateClientSecret(ctx, api, appID, *asJSON, *pipeTo)
+	return a.rotateClientSecret(ctx, api, appID, *asJSON, *pipeTo, *code)
 }
 
-func (a *app) rotateClientSecret(ctx context.Context, api *devapi.Client, appID string, asJSON bool, pipeTo string) error {
+func (a *app) rotateClientSecret(ctx context.Context, api *devapi.Client, appID string, asJSON bool, pipeTo, code string) error {
+	code, err := a.identityCode(ctx, api, "rotate_app_secret", "app", appID, code)
+	if err != nil {
+		return err
+	}
 	var rotated struct {
 		ClientSecret string `json:"client_secret"`
 		// Absent when the app had no secret before, so there is no overlap.
 		PreviousSecretExpiresAt *time.Time `json:"previous_secret_expires_at"`
 	}
-	if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/regenerate-secret", nil, &rotated); err != nil {
+	if err := api.Do(ctx, http.MethodPost, "/apps/"+url.PathEscape(appID)+"/regenerate-secret", map[string]string{"otp_code": code}, &rotated); err != nil {
 		return appAccess(err)
 	}
 	secret := rotated.ClientSecret
