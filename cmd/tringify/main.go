@@ -89,6 +89,15 @@ Apps:
   app retire            Check whether the app can be retired, then confirm in the Developer Portal
   app delete            Check whether the app can be deleted (never used only), then confirm in the Developer Portal
 
+Merchant support:
+  support cases list    List support cases from merchants who use your apps and themes
+  support cases get     Show a case with its messages and what the merchant shared
+  support cases reply   Reply to the merchant (--solve to mark it solved)
+  support cases note    Add an internal note only your team sees
+  support cases solve   Mark a case solved; support cases reopen opens it again
+  support cases assign  Assign a case to a member, yourself or no one
+  support settings get  Show your organization's support settings
+
 Development stores:
   store list            List your organization's development stores
   store create          Create a development store
@@ -190,6 +199,8 @@ func (a *app) run(ctx context.Context, args []string) error {
 		return a.store(ctx, args[1:])
 	case "app":
 		return a.appCommand(ctx, args[1:])
+	case "support":
+		return a.support(ctx, args[1:])
 	case "version", "--version", "-v":
 		a.println("tringify " + version)
 		return nil
