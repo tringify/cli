@@ -1,0 +1,44 @@
+<script>
+/* tf-tabs: shows one account panel at a time (source: the Tringify CLI, internal/themebuild/components/tabs.html, copied
+   into themes by `tringify theme components`; edit it there, never in a theme). Markup: a root with data-tf-tabs, a nav with data-tf-tabs-nav whose
+   links point at panels inside the root (href="#id", or this page's URL with #id). Links to other pages are left alone. The open panel follows the
+   address bar (#orders, #addresses …), is remembered for the visit so a saved form returns to its tab, and opens when
+   a link points at something inside it. The active link gets aria-current="page" and .is-active for the theme to
+   style. Without JS every panel shows. */
+(function () {
+  function init(root) {
+    if (root.__tftabs) return; root.__tftabs = true;
+    var nav = root.querySelector("[data-tf-tabs-nav]"); if (!nav) return;
+    var links = [], panels = [];
+    function here(a) { try { var u = new URL(a.getAttribute("href"), location.href); return u.origin === location.origin && u.pathname.replace(/\/$/, "") === location.pathname.replace(/\/$/, "") && u.hash.length > 1 ? decodeURIComponent(u.hash.slice(1)) : null; } catch (e) { return null; } }
+    nav.querySelectorAll("a[href]").forEach(function (a) {
+      var id = here(a), p = id && document.getElementById(id);
+      if (p && root.contains(p) && !nav.contains(p)) { links.push(a); panels.push(p); p.setAttribute("data-tf-tab-panel", ""); }
+    });
+    if (panels.length < 2) return;
+    root.classList.add("tf-tabbed");
+    var key = "tf-tabs:" + location.pathname;
+    function show(p, push) {
+      panels.forEach(function (x, i) { var on = x === p; x.hidden = !on; links[i].classList.toggle("is-active", on); if (on) links[i].setAttribute("aria-current", "page"); else links[i].removeAttribute("aria-current"); });
+      try { sessionStorage.setItem(key, p.id); } catch (e) {}
+      if (push) try { history.replaceState(history.state, "", "#" + p.id); } catch (e) {}
+    }
+    function owner(el) { for (var i = 0; i < panels.length; i++) if (panels[i] === el || panels[i].contains(el)) return panels[i]; return null; }
+    function fromHash() { var id = location.hash.slice(1); if (!id) return null; var el = document.getElementById(decodeURIComponent(id)); return el ? owner(el) : null; }
+    var start = fromHash();
+    if (!start) { var s = null; try { s = sessionStorage.getItem(key); } catch (e) {} if (s) { var e2 = document.getElementById(s); if (e2 && panels.indexOf(e2) > -1) start = e2; } }
+    show(start || panels[0], false);
+    links.forEach(function (a, i) { a.addEventListener("click", function (e) { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); show(panels[i], true); var top = root.getBoundingClientRect().top; if (top < 0) root.scrollIntoView({ block: "start" }); }); });
+    root.addEventListener("click", function (e) {
+      var a = e.target.closest("a[href]"); if (!a || nav.contains(a)) return;
+      var id = here(a), el = id && document.getElementById(id), p = el && owner(el);
+      if (p && p.hidden) show(p, false);
+    });
+    addEventListener("hashchange", function () { var p = fromHash(); if (p) show(p, false); });
+  }
+  var st = document.createElement("style"); st.textContent = "[data-tf-tabs] [data-tf-tab-panel][hidden]{display:none!important}"; (document.head || document.documentElement).appendChild(st);
+  function boot() { document.querySelectorAll("[data-tf-tabs]").forEach(init); }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+  document.addEventListener("tf:section-load", boot);
+})();
+</script>

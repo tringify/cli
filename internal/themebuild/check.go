@@ -1,0 +1,273 @@
+package themebuild
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"unicode"
+
+	"github.com/tringify/cli/internal/themejson"
+)
+
+// ValidMode reports whether mode is a themecheck mode.
+func ValidMode(mode string) bool { return mode == "sealed" || mode == "development" }
+
+type output struct {
+	stdout, stderr string
+	exitCode       int
+}
+
+func run(ctx context.Context, program string, args ...string) (output, error) {
+	cmd := exec.CommandContext(ctx, program, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	out := output{
+		stdout: themejson.NormalizeNewlines(stdout.String()),
+		stderr: themejson.NormalizeNewlines(stderr.String()),
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && ctx.Err() == nil {
+		out.exitCode = exit.ExitCode()
+		if out.exitCode == 0 {
+			out.exitCode = 1
+		}
+		return out, nil
+	}
+	if ctx.Err() != nil {
+		return out, ctx.Err()
+	}
+	return out, err
+}
+
+// CheckArchive runs themecheck on a runtime archive.
+func CheckArchive(ctx context.Context, archive, mode string, tools Tools) (string, error) {
+	checker, err := tools.Checker(ctx)
+	if err != nil {
+		return "", err
+	}
+	out, err := run(ctx, checker, "-json", "-mode", mode, archive)
+	if err != nil {
+		return "", err
+	}
+	if out.exitCode != 0 {
+		return "", errors.New(CheckerFailure(out.stdout, out.stderr))
+	}
+	return out.stdout, nil
+}
+
+func orFailed(text string) string {
+	if text = pyStrip(text); text == "" {
+		return "themecheck failed"
+	}
+	return text
+}
+
+// capitalize is Python's str.capitalize().
+func capitalize(s string) string {
+	r := []rune(s)
+	for i := range r {
+		if i == 0 {
+			r[i] = unicode.ToTitle(r[i])
+		} else {
+			r[i] = unicode.ToLower(r[i])
+		}
+	}
+	return string(r)
+}
+
+// CheckerFailure turns themecheck's JSON result into a readable message
+// that names the file and the reason.
+func CheckerFailure(stdout, stderr string) string {
+	payload, err := themejson.Loads(stdout)
+	if err != nil {
+		return orFailed(stdout + stderr)
+	}
+	obj, ok := payload.(*themejson.Object)
+	if !ok {
+		return orFailed(stdout + stderr)
+	}
+	errValue, _ := obj.Get("error")
+	message, ok := errValue.(themejson.String)
+	if !ok {
+		return orFailed(stdout + stderr)
+	}
+	text := string(message)
+	if code, _ := obj.Get("code"); themejson.Truthy(code) {
+		text += " (" + themejson.Str(code) + ")"
+	}
+	details, _ := obj.Get("details")
+	if d, ok := details.(*themejson.Object); ok {
+		for _, key := range d.Keys() {
+			value, _ := d.Get(key)
+			if value == nil || value == themejson.String("") {
+				continue
+			}
+			label := capitalize(strings.ReplaceAll(key, "_", " "))
+			if lines := diagnosticLines(value); lines != nil {
+				text += "\n  " + label + ":"
+				for _, line := range lines {
+					text += "\n    " + line
+				}
+				continue
+			}
+			var shown string
+			switch value.(type) {
+			case *themejson.Object, []themejson.Value:
+				shown = themejson.DumpsUnicode(value)
+			default:
+				shown = themejson.Str(value)
+			}
+			text += "\n  " + label + ": " + shown
+		}
+	} else if themejson.Truthy(details) {
+		text += "\n  " + themejson.Str(details)
+	}
+	return text
+}
+
+// Validate checks the theme's compiled files as they are, without
+// rebuilding, and returns the names of its compiled sections and the
+// checker's warnings, one readable line each.
+func Validate(ctx context.Context, root, mode string, tools Tools) ([]string, []string, error) {
+	root, err := resolvePath(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	dir, err := os.MkdirTemp("", "tringify-theme-check-")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer os.RemoveAll(dir)
+	archive := filepath.Join(dir, "theme.zip")
+	if _, err := WriteArchive(root, archive); err != nil {
+		return nil, nil, err
+	}
+	stdout, err := CheckArchive(ctx, archive, mode, tools)
+	if err != nil {
+		return nil, nil, err
+	}
+	matches, _ := filepath.Glob(filepath.Join(root, "sections", "*"+SourceExt))
+	names := []string{}
+	for _, m := range matches {
+		names = append(names, strings.TrimSuffix(filepath.Base(m), SourceExt))
+	}
+	sortNames(names)
+	return names, Warnings(stdout), nil
+}
+
+// Warnings returns the warnings in a passing themecheck result, one line each.
+func Warnings(stdout string) []string {
+	payload, err := themejson.Loads(stdout)
+	if err != nil {
+		return nil
+	}
+	obj, ok := payload.(*themejson.Object)
+	if !ok {
+		return nil
+	}
+	value, _ := obj.Get("warnings")
+	return diagnosticLines(value)
+}
+
+// diagnosticLines renders a themecheck diagnostic list as
+// "file:line:column: message; fix" lines, or nil when value is not one.
+func diagnosticLines(value themejson.Value) []string {
+	list, ok := value.([]themejson.Value)
+	if !ok || len(list) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(list))
+	for _, item := range list {
+		d, ok := item.(*themejson.Object)
+		if !ok {
+			return nil
+		}
+		field := func(key string) string {
+			v, _ := d.Get(key)
+			if v == nil {
+				return ""
+			}
+			return themejson.Str(v)
+		}
+		if field("message") == "" {
+			return nil
+		}
+		where := field("file")
+		if line := field("line"); line != "" && line != "0" {
+			where += ":" + line
+			if col := field("column"); col != "" && col != "0" {
+				where += ":" + col
+			}
+		}
+		text := field("message")
+		if where != "" {
+			text = where + ": " + text
+		}
+		if fix := field("fix"); fix != "" {
+			text += "; " + fix
+		}
+		lines = append(lines, text)
+	}
+	return lines
+}
+
+// AuthorContract returns the theme author contract printed by themecheck.
+func AuthorContract(ctx context.Context, tools Tools) (themejson.Value, error) {
+	checker, err := tools.Checker(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out, err := run(ctx, checker, "-contract")
+	if err != nil {
+		return nil, err
+	}
+	if out.exitCode != 0 {
+		return nil, errors.New(orFailed(out.stdout + out.stderr))
+	}
+	invalid := errors.New("themecheck returned an invalid author contract")
+	value, err := themejson.Loads(out.stdout)
+	if err != nil {
+		return nil, invalid
+	}
+	contract, ok := value.(*themejson.Object)
+	if !ok {
+		return nil, invalid
+	}
+	get := func(o *themejson.Object, key string) themejson.Value { v, _ := o.Get(key); return v }
+	if !themejson.IsInt(get(contract, "schema_version"), 3) {
+		return nil, invalid
+	}
+	for _, key := range []string{"ctx_needs", "setting_types", "hosted_actions"} {
+		if _, ok := get(contract, key).([]themejson.Value); !ok {
+			return nil, invalid
+		}
+	}
+	ctxObj, ok := get(contract, "ctx").(*themejson.Object)
+	if !ok || !themejson.IsInt(get(ctxObj, "schema_version"), 1) {
+		return nil, invalid
+	}
+	if _, ok := get(ctxObj, "definitions").(*themejson.Object); !ok {
+		return nil, invalid
+	}
+	roots, ok := get(ctxObj, "roots").([]themejson.Value)
+	if !ok {
+		return nil, invalid
+	}
+	names := []themejson.Value{}
+	for _, r := range roots {
+		root, ok := r.(*themejson.Object)
+		if !ok {
+			return nil, invalid
+		}
+		names = append(names, get(root, "name"))
+	}
+	if !themejson.Equal(names, get(contract, "ctx_needs")) {
+		return nil, invalid
+	}
+	return contract, nil
+}

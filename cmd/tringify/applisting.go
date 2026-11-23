@@ -1,0 +1,246 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+
+	"github.com/tringify/cli/internal/appconfig"
+)
+
+// App Store listing: the text, support email, icon and screenshots merchants
+// see. A listing change reaches the App Store with the app's next release.
+// The privacy policy, terms and docs are hosted by Tringify: `tringify app
+// privacy|terms|docs|api push`.
+
+var appListingFields = []string{"tagline", "short_description", "description", "support_email"}
+
+func (a *app) appListing(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: tringify app listing show|update")
+	}
+	switch args[0] {
+	case "show":
+		return a.appListingShow(ctx, args[1:])
+	case "update":
+		return a.appListingUpdate(ctx, args[1:])
+	}
+	return fmt.Errorf("unknown app listing command %q", args[0])
+}
+
+func (a *app) appListingShow(ctx context.Context, args []string) error {
+	fs := newFlags("app listing show [--app ID]", "Show the app's App Store listing.")
+	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
+	file := fs.String("file", appconfig.FileName, "configuration file")
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	appID, err := appTarget(*appFlag, *file)
+	if err != nil {
+		return err
+	}
+	api, _, err := a.devAPI()
+	if err != nil {
+		return err
+	}
+	var current map[string]any
+	if err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID), nil, &current); err != nil {
+		return err
+	}
+	a.printf("%s\n", str(current["name"]))
+	for _, row := range [][2]string{{"Tagline", "tagline"}, {"Short description", "short_description"}, {"Icon", "icon_url"}, {"Support email", "support_email"}} {
+		v := str(current[row[1]])
+		if v == "" {
+			v = "—"
+		}
+		a.printf("  %-18s %s\n", row[0]+":", v)
+	}
+	shots, _ := current["screenshot_file_ids"].([]any)
+	a.printf("  %-18s %d\n", "Screenshots:", len(shots))
+	if cat := str(current["category_id"]); cat != "" {
+		a.printf("  %-18s %s / %s\n", "Category:", cat, str(current["subcategory_id"]))
+	}
+	if desc := str(current["description"]); desc != "" {
+		a.printf("\n%s\n", desc)
+	}
+	// Marketplace apps: what the submit gate still needs, in its words.
+	// The privacy policy and terms are documents of their own; name the
+	// command that publishes each.
+	commands := map[string]string{"privacy_policy": "tringify app privacy push --submit", "terms": "tringify app terms push --submit", "support_email": "tringify app listing update --support-email EMAIL", "category": "tringify app listing update --category ID --subcategory ID   (IDs: tringify app categories)"}
+	requirements, _ := current["listing_requirements"].([]any)
+	var missing []string
+	for _, raw := range requirements {
+		requirement, _ := raw.(map[string]any)
+		if done, _ := requirement["done"].(bool); !done {
+			line := str(requirement["message"])
+			if command, ok := commands[str(requirement["key"])]; ok {
+				line += "\n      " + command + appArg(*appFlag, appID)
+			}
+			missing = append(missing, line)
+		}
+	}
+	if len(missing) > 0 {
+		a.println("\nBefore you can submit this listing for review:")
+		for _, message := range missing {
+			a.printf("  - %s\n", message)
+		}
+	}
+	return nil
+}
+
+func (a *app) appListingUpdate(ctx context.Context, args []string) error {
+	fs := newFlags("app listing update [--app ID] [--name NAME] [--icon FILE] [--screenshot FILE]... [--tagline T] [--description D] [--category ID --subcategory ID]", "Change the app's App Store listing. Only the parts you pass change. --name renames the app (its name in the App Store, Store Admin and the Developer Portal). The icon is a 512×512 PNG, JPEG or WebP; passing --screenshot replaces all screenshots, in the order given. --category and --subcategory (see `tringify app categories`) place a standard app in the App Store; a sales channel app's category is set when it is created. The change reaches the App Store with the next `tringify app release` and `tringify app publish`.")
+	appFlag := fs.String("app", "", "app ID (default: app_id in "+appconfig.FileName+")")
+	file := fs.String("file", appconfig.FileName, "configuration file")
+	name := fs.String("name", "", "the app's name")
+	icon := fs.String("icon", "", "app icon image, 512×512")
+	tagline := fs.String("tagline", "", "one-line tagline")
+	short := fs.String("short-description", "", "short description")
+	description := fs.String("description", "", "listing description")
+	descriptionFile := fs.String("description-file", "", "read the description from this file")
+	supportEmail := fs.String("support-email", "", "where merchants email for help")
+	category := fs.String("category", "", "App Store category ID (see `tringify app categories`)")
+	subcategory := fs.String("subcategory", "", "App Store subcategory ID, within --category")
+	var screenshots stringList
+	fs.Var(&screenshots, "screenshot", "screenshot image; repeat for each, in display order")
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	appID, err := appTarget(*appFlag, *file)
+	if err != nil {
+		return err
+	}
+	if *descriptionFile != "" {
+		raw, err := os.ReadFile(*descriptionFile)
+		if err != nil {
+			return err
+		}
+		*description = strings.TrimSpace(string(raw))
+	}
+	if *icon != "" {
+		if err := checkIcon(*icon); err != nil {
+			return err
+		}
+	}
+	for _, p := range screenshots {
+		if _, err := mediaType(p); err != nil {
+			return err
+		}
+	}
+	if (*category == "") != (*subcategory == "") {
+		return errors.New("pass --category and --subcategory together")
+	}
+	api, _, err := a.devAPI()
+	if err != nil {
+		return err
+	}
+	return a.updateAppListing(ctx, api, appID, appListingChange{
+		name: strings.TrimSpace(*name), icon: *icon, screenshots: screenshots,
+		text: map[string]string{"tagline": *tagline, "short_description": *short, "description": *description, "support_email": *supportEmail, "category_id": *category, "subcategory_id": *subcategory},
+	})
+}
+
+type appListingChange struct {
+	name        string
+	icon        string
+	screenshots []string
+	text        map[string]string
+}
+
+// updateAppListing applies a change to the app's listing, keeping every
+// field the change does not name.
+func (a *app) updateAppListing(ctx context.Context, api devAPIDoer, appID string, change appListingChange) error {
+	var current map[string]any
+	if err := api.Do(ctx, http.MethodGet, "/apps/"+url.PathEscape(appID), nil, &current); err != nil {
+		return err
+	}
+	// The listing update replaces the text, icon and screenshots and clears
+	// any it is not sent (the category changes only when given), so start
+	// from the listing as it is and change only what was asked.
+	body := map[string]any{}
+	for _, key := range appListingFields {
+		body[key] = str(current[key])
+	}
+	body["icon_file_id"] = str(current["icon_file_id"])
+	ids := []any{}
+	if list, ok := current["screenshot_file_ids"].([]any); ok {
+		ids = list
+	}
+	body["screenshot_file_ids"] = ids
+	changed := false
+	for key, v := range change.text {
+		if v != "" {
+			body[key] = v
+			changed = true
+		}
+	}
+	if change.icon != "" {
+		id, err := a.uploadMedia(ctx, api, change.icon, "/org/apps/media/upload-intents", map[string]any{"category": "app_icon"})
+		if err != nil {
+			return err
+		}
+		body["icon_file_id"] = id
+		changed = true
+	}
+	if len(change.screenshots) > 0 {
+		var shots []string
+		for _, p := range change.screenshots {
+			id, err := a.uploadMedia(ctx, api, p, "/org/apps/media/upload-intents", map[string]any{"category": "app_screenshot"})
+			if err != nil {
+				return err
+			}
+			shots = append(shots, id)
+		}
+		body["screenshot_file_ids"] = shots
+		changed = true
+	}
+	if !changed && change.name == "" {
+		return errors.New("nothing to change: pass at least one of the flags")
+	}
+	// The name is changed on its own route, which leaves every other app
+	// setting as it is.
+	if change.name != "" {
+		if err := api.Do(ctx, http.MethodPut, "/apps/"+url.PathEscape(appID)+"/name", map[string]any{"name": change.name}, nil); err != nil {
+			return err
+		}
+		current["name"] = change.name
+	}
+	if changed {
+		if err := api.Do(ctx, http.MethodPut, "/apps/"+url.PathEscape(appID)+"/listing", body, nil); err != nil {
+			return err
+		}
+	}
+	a.printf("Updated the listing of %s. Release and publish the app to show it in the App Store:\n  tringify app release --app %s --bump patch --notes \"Listing update.\"\n  tringify app publish VERSION --app %s\n", str(current["name"]), appID, appID)
+	return nil
+}
+
+// checkIcon rejects an icon that is not a 512×512 image before uploading it.
+func checkIcon(path string) error {
+	t, err := mediaType(path)
+	if err != nil {
+		return err
+	}
+	if t == "image/webp" {
+		return nil // the App Store checks WebP dimensions on upload
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return fmt.Errorf("%s could not be read as an image: %w", path, err)
+	}
+	if cfg.Width != 512 || cfg.Height != 512 {
+		return fmt.Errorf("%s is %d×%d; the app icon must be 512×512", path, cfg.Width, cfg.Height)
+	}
+	return nil
+}

@@ -1,0 +1,208 @@
+// Package devapi calls the Tringify Developer API with a developer
+// organization login or a trusted publishing token.
+package devapi
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/tringify/cli/internal/mcp"
+)
+
+// Client calls the Developer API for one organization.
+type Client struct {
+	Base           string
+	OrganizationID string
+	Tokens         mcp.TokenSource
+	HTTP           *http.Client
+	Version        string
+}
+
+func New(base, organizationID string, tokens mcp.TokenSource, version string) *Client {
+	return &Client{Base: base, OrganizationID: organizationID, Tokens: tokens, HTTP: &http.Client{Timeout: 2 * time.Minute}, Version: version}
+}
+
+// Public calls the Developer API's public endpoints, which need no sign-in.
+func Public(base, version string) *Client {
+	return &Client{Base: base, HTTP: &http.Client{Timeout: 2 * time.Minute}, Version: version}
+}
+
+// Error is an error returned by the API.
+type Error struct {
+	Status  int
+	Code    string
+	Message string
+	// Detail is the API's explanation of a validation failure, when it gives one.
+	Detail string
+	// Field is the request field a validation failure concerns, as a path
+	// (server_events.attribution.cookies), when the API names one.
+	Field string
+	// ProfileURL is the Developer Portal page that completes the developer
+	// profile, sent with DEVELOPER_PROFILE_APPROVAL_REQUIRED.
+	ProfileURL string
+}
+
+func (e *Error) Error() string {
+	if e.Message == "" {
+		return fmt.Sprintf("request failed (HTTP %d)", e.Status)
+	}
+	message := e.Message
+	if e.Detail != "" && e.Detail != e.Message {
+		message += " " + e.Detail
+	}
+	if e.Field != "" {
+		message = e.Field + ": " + message
+	}
+	if e.Code != "" {
+		message += " (" + e.Code + ")"
+	}
+	if e.ProfileURL != "" {
+		message += "\nComplete your developer profile: " + e.ProfileURL
+	}
+	return message
+}
+
+// Do sends a request and decodes the "data" field of a successful reply.
+func (c *Client) Do(ctx context.Context, method, path string, body any, out any) error {
+	return c.DoWithHeaders(ctx, method, path, body, nil, out)
+}
+
+// DoWithHeaders is Do with extra request headers (for example a proof-of-work
+// X-Challenge-Token).
+func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body any, headers map[string]string, out any) error {
+	var payload []byte
+	if body != nil {
+		var err error
+		if payload, err = json.Marshal(body); err != nil {
+			return err
+		}
+	}
+	return c.send(ctx, method, path, payload, "application/json", headers, func(resp *http.Response) error {
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		if err != nil || len(raw) == 0 {
+			return err
+		}
+		var envelope struct {
+			Success *bool           `json:"success"`
+			Data    json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return fmt.Errorf("the Developer API returned an unreadable reply: %w", err)
+		}
+		if envelope.Success != nil && !*envelope.Success {
+			return apiError(resp.StatusCode, raw)
+		}
+		if out == nil || len(envelope.Data) == 0 {
+			return nil
+		}
+		return json.Unmarshal(envelope.Data, out)
+	})
+}
+
+// send makes the request with a fresh access token, retrying once with a
+// refreshed token on 401, and hands a successful (2xx) response to read.
+func (c *Client) send(ctx context.Context, method, path string, payload []byte, accept string, headers map[string]string, read func(*http.Response) error) error {
+	for attempt := 0; attempt < 2; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, method, c.Base+"/api/v1"+path, bytes.NewReader(payload))
+		if err != nil {
+			return err
+		}
+		if c.Tokens != nil {
+			var token string
+			if attempt == 0 {
+				token, err = c.Tokens.AccessToken(ctx)
+			} else {
+				token, err = c.Tokens.ForceRefresh(ctx)
+			}
+			if err != nil {
+				return err
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
+			org := c.OrganizationID
+			// A trusted publishing token names its organization only once
+			// it has been exchanged.
+			if o, ok := c.Tokens.(interface{ OrganizationID() string }); ok && o.OrganizationID() != "" {
+				org = o.OrganizationID()
+			}
+			req.Header.Set("X-Organization-ID", org)
+		}
+		req.Header.Set("Accept", accept)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		req.Header.Set("User-Agent", "tringify-cli/"+c.Version)
+		if payload != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 && c.Tokens != nil {
+			resp.Body.Close()
+			continue
+		}
+		if resp.StatusCode >= 400 {
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
+			e := apiError(resp.StatusCode, raw)
+			if resp.StatusCode == http.StatusUnauthorized {
+				return errors.Join(mcp.ErrUnauthorized, e)
+			}
+			return e
+		}
+		err = read(resp)
+		resp.Body.Close()
+		return err
+	}
+	return mcp.ErrUnauthorized
+}
+
+// apiError reads the API's error reply: {"error":{"code","message"}} or a
+// top-level code and message.
+func apiError(status int, raw []byte) *Error {
+	var envelope struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Details any    `json:"details"`
+		Error   *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Details any    `json:"details"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(raw, &envelope)
+	e := &Error{Status: status, Code: envelope.Code, Message: envelope.Message}
+	details := envelope.Details
+	if envelope.Error != nil {
+		e.Code, e.Message, details = envelope.Error.Code, envelope.Error.Message, envelope.Error.Details
+	}
+	// Only a text explanation and the field it concerns are shown; other
+	// structured details stay out of the one-line error.
+	switch d := details.(type) {
+	case string:
+		e.Detail = d
+	case map[string]any:
+		e.Field, _ = d["field"].(string)
+		e.ProfileURL, _ = d["profile_url"].(string)
+	}
+	// A reply that is not the API's error format (from a proxy, say) is shown
+	// as the start of its text, so the failure can still be reported.
+	if e.Message == "" && e.Code == "" {
+		text := strings.Join(strings.Fields(string(raw)), " ")
+		if len(text) > 200 {
+			text = text[:200] + "..."
+		}
+		if text != "" {
+			e.Message = fmt.Sprintf("request failed (HTTP %d): %s", status, text)
+		}
+	}
+	return e
+}

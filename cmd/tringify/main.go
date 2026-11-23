@@ -1,0 +1,292 @@
+// Command tringify is the Tringify command-line tool.
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+
+	"github.com/tringify/cli/internal/mcp"
+	"github.com/tringify/cli/internal/themebinaries"
+	"github.com/tringify/cli/internal/trustedpublishing"
+)
+
+// version is set at build time.
+var version = "dev"
+
+const usage = `Tringify CLI
+
+Usage:
+  tringify <command> [flags]
+
+Account:
+  login                 Sign in to a developer organization
+  login --store         Sign in to a store (for theme push and theme dev)
+  logout                Sign out and revoke access
+  whoami                Show who you are signed in as
+
+Themes:
+  theme init [DIR]      Create a theme from Canvas, the default theme
+  theme preview [DIR]   Preview the theme locally with sample content
+  theme build [DIR]     Compile src/sections into sections/*.vasc
+  theme check [DIR]     Validate the theme
+  theme package [DIR]   Write an upload-ready ZIP
+  theme context [DIR]   Print the sample data a preview page receives
+  theme contract        Print the theme author contract as JSON
+  theme components      Copy the shared storefront components into your section sources
+  theme reference       Write the theme's reference pages (docs/ref-*.md) for theme docs
+  theme push            Add the theme to a store as a new, unpublished theme
+  theme dev             Sync your edits into an unpublished theme on a store
+  theme pull            Download a store theme or a published version into a new directory
+  theme diff            Compare the theme with a published version of your listing
+  theme listings        List your organization's theme listings
+  theme create          Create a free theme listing
+  theme update          Change a listing's text, category, screenshots, style covers and hero images
+  theme categories      List the Theme Store categories
+  theme docs            Publish the theme's documentation from markdown files
+  theme docs status     Show the theme documentation's draft, review and published version
+  theme submit          Submit a listing for Theme Store review
+  theme publish         Publish the theme as a new version of a listing
+
+Apps:
+  app list              List your organization's apps
+  app create            Create an app (choose its handle with --handle)
+  app categories        List the category and subcategory IDs for app create
+  app init              Create a project for an app from the app starter
+  app config pull       Write the app's configuration to tringify.app.json
+  app config push       Replace the app's draft configuration with tringify.app.json
+  app config check      Check tringify.app.json with the app platform's rules, without pushing
+  app block check       Check the app's blocks with the app platform's rules
+  app block context     Print the sample data each app block receives on a page
+  app block preview     Preview the app's blocks inside a theme, as a store renders them
+  app install-link      Create a link that installs the app on a store
+  app release           Release the draft as a new version (--bump, or --version X.Y.Z)
+  app versions          List the app's versions
+  app listing show      Show the app's App Store listing
+  app listing update    Change the listing's text, support email, icon and screenshots
+  app privacy push      Save privacy.md as the draft privacy policy (--submit to send it for review)
+  app privacy status    Show the privacy policy's draft, review and published version
+  app terms push        Save terms.md as the draft terms of service (--submit to send it for review)
+  app terms status      Show the terms of service's draft, review and published version
+  app docs push         Save docs/*.md as the draft documentation (--submit to send it for review)
+  app docs status       Show the documentation's draft, review and published version
+  app api push          Save api/*.md as the draft API reference (--submit to send it for review)
+  app api status        Show the API reference's draft, review and published version
+  app publish VERSION   Publish an approved version
+  app webhook test      Send a test webhook to the app's webhook URL
+  app webhook rotate-key Issue a new webhook signing secret; requests are also signed with the previous one for 72 hours
+  app webhook finish-rotation Stop signing requests with the previous webhook signing secret now
+  app secret rotate     Issue a new client secret; the previous one keeps working for 72 hours
+  app secret finish-rotation Stop accepting the previous client secret now
+  app deliveries        List webhook deliveries to the app
+  app retire            Check whether the app can be retired, then confirm in the Developer Portal
+  app delete            Check whether the app can be deleted (never used only), then confirm in the Developer Portal
+
+Merchant support:
+  support cases list    List support cases from merchants who use your apps and themes
+  support cases get     Show a case with its messages and what the merchant shared
+  support cases reply   Reply to the merchant (--solve to mark it solved)
+  support cases note    Add an internal note only your team sees
+  support cases solve   Mark a case solved; support cases reopen opens it again
+  support cases assign  Assign a case to a member, yourself or no one
+  support settings get  Show your organization's support settings
+
+Development stores:
+  store list            List your organization's development stores
+  store create          Create a development store
+
+Publishing from GitHub Actions (trusted publishing, no stored secret):
+  In a job with "permissions: id-token: write", or with --oidc, these commands
+  exchange the job's ID token for a short-lived publishing token instead of
+  using a login: theme publish, theme docs [status], theme update,
+  app config check|push, app release, app publish, app docs push|status.
+  --listing is optional for the theme commands; questions need --yes.
+
+Other:
+  version               Print the CLI version
+
+Run "tringify <command> --help" for details.
+`
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	app := newApp(os.Stdout, os.Stderr)
+	if err := app.run(ctx, os.Args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(2)
+		}
+		fmt.Fprintln(os.Stderr, "Error:", app.friendlyError(err))
+		os.Exit(1)
+	}
+}
+
+func friendly(err error) string {
+	switch {
+	case errors.Is(err, mcp.ErrUnauthorized):
+		return "your sign-in has expired or was revoked. Run `tringify login` again."
+	case errors.Is(err, mcp.ErrInsufficientScope):
+		return err.Error()
+	}
+	return err.Error()
+}
+
+type app struct {
+	stdin          io.Reader
+	stdout, stderr io.Writer
+	apiBase        string
+	devAPIBase     string
+	portalBase     string // the Developer Portal, where dangerous actions are confirmed
+	resolver       *themebinaries.Resolver
+	uploadHTTP     *http.Client // signed-URL uploads; nil means a 2-minute default
+	command        string       // the command being run, such as "theme publish"
+	oidc           bool         // --oidc: use trusted publishing
+	want           trustedpublishing.Resource
+	publisher      *trustedpublishing.Source // trusted publishing, once used
+}
+
+func newApp(stdout, stderr io.Writer) *app {
+	a := &app{stdin: os.Stdin, stdout: stdout, stderr: stderr, apiBase: "https://api.tringify.com", devAPIBase: "https://api-dev.tringify.com", portalBase: "https://dev.tringify.com"}
+	if v := os.Getenv("TRINGIFY_API_BASE"); v != "" {
+		a.apiBase = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("TRINGIFY_DEVELOPER_API_BASE"); v != "" {
+		a.devAPIBase = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("TRINGIFY_DEVELOPER_PORTAL_BASE"); v != "" {
+		a.portalBase = strings.TrimRight(v, "/")
+	}
+	return a
+}
+
+func (a *app) printf(format string, args ...any) { fmt.Fprintf(a.stdout, format, args...) }
+func (a *app) println(s string)                  { fmt.Fprintln(a.stdout, s) }
+
+func (a *app) run(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		fmt.Fprint(a.stdout, usage)
+		return nil
+	}
+	args, oidc, err := takeOIDCFlag(args)
+	if err != nil {
+		return err
+	}
+	a.oidc = oidc
+	a.command = commandName(args)
+	if len(args) == 0 {
+		return fmt.Errorf("--oidc (trusted publishing) works only with %s", publishingCommandList)
+	}
+	if a.oidc && !publishingCommands[a.command] {
+		return fmt.Errorf("--oidc (trusted publishing) works only with %s, not with `tringify %s`", publishingCommandList, a.command)
+	}
+	switch args[0] {
+	case "login":
+		return a.login(ctx, args[1:])
+	case "logout":
+		return a.logout(ctx, args[1:])
+	case "whoami":
+		return a.whoami(ctx, args[1:])
+	case "theme":
+		return a.theme(ctx, args[1:])
+	case "store":
+		return a.store(ctx, args[1:])
+	case "app":
+		return a.appCommand(ctx, args[1:])
+	case "support":
+		return a.support(ctx, args[1:])
+	case "version", "--version", "-v":
+		a.println("tringify " + version)
+		return nil
+	case "help", "--help", "-h":
+		fmt.Fprint(a.stdout, usage)
+		return nil
+	}
+	return fmt.Errorf("unknown command %q. Run `tringify help`", args[0])
+}
+
+func (a *app) theme(ctx context.Context, args []string) error {
+	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		fmt.Fprint(a.stdout, usage)
+		return nil
+	}
+	switch args[0] {
+	case "init":
+		return a.themeInit(ctx, args[1:])
+	case "build":
+		return a.themeBuild(ctx, args[1:])
+	case "check":
+		return a.themeCheck(ctx, args[1:])
+	case "preview":
+		return a.themePreview(ctx, args[1:])
+	case "context":
+		return a.themeContext(ctx, args[1:])
+	case "contract":
+		return a.themeContract(ctx, args[1:])
+	case "package":
+		return a.themePackage(ctx, args[1:])
+	case "push":
+		return a.themePush(ctx, args[1:])
+	case "dev":
+		return a.themeDev(ctx, args[1:])
+	case "pull":
+		return a.themePull(ctx, args[1:])
+	case "diff":
+		return a.themeDiff(ctx, args[1:])
+	case "listings":
+		return a.themeListings(ctx, args[1:])
+	case "publish":
+		return a.themePublish(ctx, args[1:])
+	case "create":
+		return a.themeCreate(ctx, args[1:])
+	case "update":
+		return a.themeUpdate(ctx, args[1:])
+	case "submit":
+		return a.themeSubmit(ctx, args[1:])
+	case "categories":
+		return a.themeCategories(ctx, args[1:])
+	case "docs":
+		return a.themeDocs(ctx, args[1:])
+	case "components":
+		return a.themeComponents(ctx, args[1:])
+	case "reference":
+		return a.themeReference(ctx, args[1:])
+	}
+	return fmt.Errorf("unknown theme command %q", args[0])
+}
+
+func newFlags(name, summary string) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: tringify %s\n\n%s\n", name, summary)
+		hasFlags := false
+		fs.VisitAll(func(*flag.Flag) { hasFlags = true })
+		if hasFlags {
+			fmt.Fprintln(fs.Output(), "\nFlags:")
+			fs.PrintDefaults()
+		}
+	}
+	return fs
+}
+
+// parse accepts flags before or after positional arguments.
+func parse(fs *flag.FlagSet, args []string) ([]string, error) {
+	var positional []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		args = fs.Args()
+		if len(args) == 0 {
+			return positional, nil
+		}
+		positional = append(positional, args[0])
+		args = args[1:]
+	}
+}

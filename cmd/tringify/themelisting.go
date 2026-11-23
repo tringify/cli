@@ -1,0 +1,428 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"mime"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/tringify/cli/internal/upload"
+)
+
+func (a *app) themeCreate(ctx context.Context, args []string) error {
+	fs := newFlags("theme create --name NAME --slug SLUG [--support-url URL] [--terms-url URL]", "Create a free theme listing in your developer organization. Publish versions to it with `tringify theme publish`.")
+	name := fs.String("name", "", "listing name shown in the Theme Store")
+	slug := fs.String("slug", "", "URL name, lowercase letters, numbers and hyphens")
+	support := fs.String("support-url", "", "where merchants get help")
+	terms := fs.String("terms-url", "", "terms of use page")
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	if *name == "" || *slug == "" {
+		return errors.New("--name and --slug are required")
+	}
+	api, session, err := a.devAPI()
+	if err != nil {
+		return err
+	}
+	body := map[string]any{"name": *name, "slug": *slug, "commercial_model": "free"}
+	if *support != "" {
+		body["support_url"] = *support
+	}
+	if *terms != "" {
+		body["terms_url"] = *terms
+	}
+	var created map[string]any
+	if err := api.Do(ctx, http.MethodPost, "/org/themes", body, &created); err != nil {
+		return err
+	}
+	id := str(created["id"])
+	if id == "" {
+		id = str(created["listing_id"])
+	}
+	a.printf("Created listing %s (%s) in %s.\n", *name, id, session.Account.Target.Name)
+	a.println("Next: `tringify theme update --listing " + id + "` for its text and screenshots, then `tringify theme publish`.")
+	return nil
+}
+
+func (a *app) themeCategories(ctx context.Context, args []string) error {
+	fs := newFlags("theme categories", "List the Theme Store categories, for `tringify theme update --category`.")
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	api, _, err := a.devAPI()
+	if err != nil {
+		return err
+	}
+	var data map[string]any
+	if err := api.Do(ctx, http.MethodGet, "/org/theme-categories", nil, &data); err != nil {
+		return err
+	}
+	for _, c := range listAt(data, "categories") {
+		a.printf("%s  %s\n", str(c["slug"]), str(c["name"]))
+	}
+	return nil
+}
+
+func (a *app) themeUpdate(ctx context.Context, args []string) error {
+	fs := newFlags("theme update --listing ID [--oidc] [--tagline T] [--description D] [--category SLUG] [--screenshot FILE]... [--style-cover STYLE=FILE]... [--hero FILE] [--style-hero STYLE=FILE]...", "Change a listing's text, category, links, screenshots, style covers and hero images. Only the parts you pass change. Screenshots and covers are 1280×720 PNG, JPEG or WebP; passing --screenshot replaces all screenshots, in the order given, and passing --style-cover replaces all covers. Hero images are the tall pictures the Theme Store hero shows for a featured theme: 1200×1500 (4:5); --hero sets the theme's own, --style-hero one style's (the style needs a cover). In a GitHub Actions job with `permissions: id-token: write` (or with --oidc) it uses trusted publishing, and --listing is optional.")
+	listing := fs.String("listing", "", "theme listing ID (see `tringify theme listings`); optional with trusted publishing")
+	name := fs.String("name", "", "new listing name")
+	tagline := fs.String("tagline", "", "one-line tagline")
+	description := fs.String("description", "", "listing description")
+	descriptionFile := fs.String("description-file", "", "read the description from this file")
+	category := fs.String("category", "", "category slug or ID (see `tringify theme categories`)")
+	support := fs.String("support-url", "", "where merchants get help")
+	terms := fs.String("terms-url", "", "terms of use page")
+	var screenshots, covers, styleHeroes stringList
+	hero := fs.String("hero", "", "the theme's own hero image (1200×1500) for the Theme Store hero")
+	fs.Var(&styleHeroes, "style-hero", "a style's hero image as STYLE=FILE; repeat for each style")
+	fs.Var(&screenshots, "screenshot", "screenshot image; repeat for each, in display order")
+	fs.Var(&covers, "style-cover", "a style's cover as STYLE=FILE, where STYLE is the preset name; repeat for each style")
+	oidcFlag(fs)
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	if *descriptionFile != "" {
+		raw, err := os.ReadFile(*descriptionFile)
+		if err != nil {
+			return err
+		}
+		*description = strings.TrimSpace(string(raw))
+	}
+	type cover struct{ name, path string }
+	var coverList, heroList []cover
+	if *hero != "" {
+		heroList = append(heroList, cover{"", *hero})
+	}
+	for _, h := range styleHeroes {
+		style, path, ok := strings.Cut(h, "=")
+		if !ok || strings.TrimSpace(style) == "" || path == "" {
+			return fmt.Errorf("--style-hero %q must be STYLE=FILE", h)
+		}
+		heroList = append(heroList, cover{strings.TrimSpace(style), path})
+	}
+	for _, h := range heroList {
+		if _, err := mediaType(h.path); err != nil {
+			return err
+		}
+	}
+	for _, c := range covers {
+		style, path, ok := strings.Cut(c, "=")
+		if !ok || strings.TrimSpace(style) == "" || path == "" {
+			return fmt.Errorf("--style-cover %q must be STYLE=FILE", c)
+		}
+		coverList = append(coverList, cover{strings.TrimSpace(style), path})
+	}
+	for _, p := range append(append([]string{}, screenshots...), func() []string {
+		var ps []string
+		for _, c := range coverList {
+			ps = append(ps, c.path)
+		}
+		return ps
+	}()...) {
+		if _, err := mediaType(p); err != nil {
+			return err
+		}
+	}
+	listingID, err := a.themeListing(ctx, *listing)
+	if err != nil {
+		return err
+	}
+	api, _, err := a.devAPI()
+	if err != nil {
+		return err
+	}
+	var current map[string]any
+	if err := api.Do(ctx, http.MethodGet, "/org/themes/"+url.PathEscape(listingID), nil, &current); err != nil {
+		return err
+	}
+	// The listing update replaces every field it is sent and clears the ones it
+	// is not, so start from the listing as it is and change only what was asked.
+	body := map[string]any{"name": str(current["name"])}
+	for _, key := range []string{"tagline", "description", "category_id", "support_url", "terms_url"} {
+		if v := str(current[key]); v != "" {
+			body[key] = v
+		}
+	}
+	if ids, ok := current["screenshot_file_ids"].([]any); ok && len(ids) > 0 {
+		body["screenshot_file_ids"] = ids
+	}
+	var keep []map[string]string
+	if covers, ok := current["style_covers"].([]any); ok {
+		for _, c := range covers {
+			m, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			entry := map[string]string{"name": str(m["name"])}
+			if v := str(m["file_id"]); v != "" {
+				entry["file_id"] = v
+			}
+			if v := str(m["hero_file_id"]); v != "" {
+				entry["hero_file_id"] = v
+			}
+			if (entry["name"] != "" && entry["file_id"] != "") || (entry["name"] == "" && entry["hero_file_id"] != "") {
+				keep = append(keep, entry)
+			}
+		}
+	}
+	if len(keep) > 0 {
+		body["style_covers"] = keep
+	}
+	changed := false
+	for key, v := range map[string]string{"name": *name, "tagline": *tagline, "description": *description, "support_url": *support, "terms_url": *terms} {
+		if v != "" {
+			body[key] = v
+			changed = true
+		}
+	}
+	if *category != "" {
+		id, err := categoryID(ctx, api, *category)
+		if err != nil {
+			return err
+		}
+		body["category_id"] = id
+		changed = true
+	}
+	if len(screenshots) > 0 {
+		var ids []string
+		for _, p := range screenshots {
+			id, err := a.uploadListingMedia(ctx, api, p)
+			if err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		body["screenshot_file_ids"] = ids
+		changed = true
+	}
+	if len(coverList) > 0 {
+		var list []map[string]string
+		for _, c := range coverList {
+			id, err := a.uploadListingMedia(ctx, api, c.path)
+			if err != nil {
+				return err
+			}
+			list = append(list, map[string]string{"name": c.name, "file_id": id})
+		}
+		// a new set of covers keeps the heroes already given (the theme's own and each style's still present)
+		for _, k := range keep {
+			if k["hero_file_id"] == "" {
+				continue
+			}
+			found := false
+			for _, e := range list {
+				if e["name"] == k["name"] {
+					e["hero_file_id"] = k["hero_file_id"]
+					found = true
+				}
+			}
+			if !found && k["name"] == "" {
+				list = append([]map[string]string{{"name": "", "hero_file_id": k["hero_file_id"]}}, list...)
+			}
+		}
+		body["style_covers"] = list
+		keep = list
+		changed = true
+	}
+	if len(heroList) > 0 {
+		for _, h := range heroList {
+			id, err := a.uploadListingHero(ctx, api, h.path)
+			if err != nil {
+				return err
+			}
+			found := false
+			for _, e := range keep {
+				if e["name"] == h.name {
+					e["hero_file_id"] = id
+					found = true
+				}
+			}
+			if !found {
+				if h.name != "" {
+					return fmt.Errorf("--style-hero %q: the style has no cover yet; add one with --style-cover", h.name)
+				}
+				keep = append([]map[string]string{{"name": "", "hero_file_id": id}}, keep...)
+			}
+		}
+		body["style_covers"] = keep
+		changed = true
+	}
+	if !changed {
+		return errors.New("nothing to change: pass at least one of the flags")
+	}
+	if err := api.Do(ctx, http.MethodPut, "/org/themes/"+url.PathEscape(listingID), body, nil); err != nil {
+		return err
+	}
+	a.printf("Updated listing %s.\n", listingID)
+	return nil
+}
+
+func (a *app) themeSubmit(ctx context.Context, args []string) error {
+	fs := newFlags("theme submit --listing ID", "Submit a listing for Theme Store review.")
+	listing := fs.String("listing", "", "theme listing ID (see `tringify theme listings`)")
+	if _, err := parse(fs, args); err != nil {
+		return err
+	}
+	if *listing == "" {
+		return errors.New("--listing is required")
+	}
+	api, _, err := a.devAPI()
+	if err != nil {
+		return err
+	}
+	path := "/org/themes/" + url.PathEscape(*listing) + "/review"
+	var review map[string]any
+	if err := api.Do(ctx, http.MethodGet, path, nil, &review); err != nil {
+		return err
+	}
+	var next map[string]any
+	body := map[string]any{"action": "submit", "expected_event_id": str(review["latest_event_id"]), "expected_revision": str(review["review_revision"])}
+	if err := api.Do(ctx, http.MethodPost, path, body, &next); err != nil {
+		return err
+	}
+	status := str(next["status"])
+	if status == "" {
+		status = "submitted"
+	}
+	a.printf("Submitted listing %s for review (%s).\n", *listing, status)
+	return nil
+}
+
+// mediaType checks a listing image and returns its MIME type.
+func mediaType(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("%s is a directory", path)
+	}
+	t := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+	if i := strings.IndexByte(t, ';'); i >= 0 {
+		t = t[:i]
+	}
+	switch t {
+	case "image/png", "image/jpeg", "image/webp":
+		return t, nil
+	}
+	return "", fmt.Errorf("%s must be a PNG, JPEG or WebP image", path)
+}
+
+// uploadListingMedia uploads one theme listing image and returns its file ID.
+func (a *app) uploadListingMedia(ctx context.Context, api devAPIDoer, path string) (string, error) {
+	return a.uploadMedia(ctx, api, path, "/org/themes/media/upload-intents", nil)
+}
+
+// uploadListingHero uploads one theme listing hero picture (1200×1500) and returns its file ID.
+func (a *app) uploadListingHero(ctx context.Context, api devAPIDoer, path string) (string, error) {
+	return a.uploadMedia(ctx, api, path, "/org/themes/media/upload-intents", map[string]any{"category": "theme_hero"})
+}
+
+// uploadMedia uploads one image through an upload-intent endpoint (base, with
+// /finalize and /status beside it) and returns its file ID. extra adds fields
+// to the intent request, such as the file category.
+func (a *app) uploadMedia(ctx context.Context, api devAPIDoer, path, base string, extra map[string]any) (string, error) {
+	t, err := mediaType(path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	var grant upload.Grant
+	request := map[string]any{"original_name": filepath.Base(path), "mime_type": t, "size_bytes": info.Size()}
+	for k, v := range extra {
+		request[k] = v
+	}
+	if err := api.Do(ctx, http.MethodPost, base, request, &grant); err != nil {
+		return "", fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+	if grant.Headers == nil {
+		grant.Headers = map[string]string{}
+	}
+	if grant.Headers["Content-Type"] == "" {
+		grant.Headers["Content-Type"] = t
+	}
+	client := a.uploadHTTP
+	if client == nil {
+		client = &http.Client{Timeout: 2 * time.Minute}
+	}
+	if err := upload.Put(ctx, client, grant, path); err != nil {
+		return "", fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+	ids := map[string]any{"intent_ids": []string{grant.IntentID}}
+	if err := api.Do(ctx, http.MethodPost, base+"/finalize", ids, nil); err != nil {
+		return "", fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		var status struct {
+			Intents []struct {
+				Status string `json:"status"`
+				File   *struct {
+					ID string `json:"id"`
+				} `json:"file"`
+				Error *struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			} `json:"intents"`
+		}
+		if err := api.Do(ctx, http.MethodPost, base+"/status", ids, &status); err != nil {
+			return "", fmt.Errorf("%s: %w", filepath.Base(path), err)
+		}
+		if len(status.Intents) == 1 {
+			s := status.Intents[0]
+			switch s.Status {
+			case "ready":
+				if s.File == nil || s.File.ID == "" {
+					return "", fmt.Errorf("%s: the upload finished without a file", filepath.Base(path))
+				}
+				a.printf("Uploaded %s.\n", filepath.Base(path))
+				return s.File.ID, nil
+			case "pending", "processing":
+			default:
+				msg := s.Status
+				if s.Error != nil && s.Error.Message != "" {
+					msg = s.Error.Message
+				}
+				return "", fmt.Errorf("%s was not accepted: %s", filepath.Base(path), msg)
+			}
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("%s: still processing after two minutes", filepath.Base(path))
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+// categoryID accepts a category slug, name or ID.
+func categoryID(ctx context.Context, api devAPIDoer, want string) (string, error) {
+	var data map[string]any
+	if err := api.Do(ctx, http.MethodGet, "/org/theme-categories", nil, &data); err != nil {
+		return "", err
+	}
+	for _, c := range listAt(data, "categories") {
+		if str(c["id"]) == want || strings.EqualFold(str(c["slug"]), want) || strings.EqualFold(str(c["name"]), want) {
+			return str(c["id"]), nil
+		}
+	}
+	return "", fmt.Errorf("no category %q. See `tringify theme categories`", want)
+}
+
+// devAPIDoer is the part of the developer API client these commands use.
+type devAPIDoer interface {
+	Do(ctx context.Context, method, path string, body, out any) error
+}
